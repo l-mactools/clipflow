@@ -37,7 +37,7 @@
 
 拾笺启动后驻留在菜单栏，不会自动弹出完整窗口。全局快捷键只打开轻量历史面板；需要整理记录时，再从菜单栏进入完整管理窗口。
 
-默认快捷键为 `⇧⌘V`，也可以录制成自己习惯的组合键，包括 `Fn` 修饰键。
+默认快捷键为 `⇧⌘V`，也可以录制成自己习惯的组合键。
 
 ## 数据留在你的 Mac
 
@@ -50,22 +50,14 @@
 - 历史记录：`~/Library/Application Support/ClipFlow/history.json`
 - 图片：`~/Library/Application Support/ClipFlow/images/`
 
-为兼容早期版本，内部数据目录继续沿用 `ClipFlow` 名称。
-
 ## 安装
 
 前往 [Releases](https://github.com/l-mactools/clipflow/releases) 下载最新的 `Jian-*-macos-arm64.zip`。解压后，将 `Jian.app` 移动到“应用程序”目录即可。
-
-当前版本采用临时签名，尚未经过 Apple 公证。首次启动如果被 Gatekeeper 拦截，请前往“系统设置 → 隐私与安全性”，选择“仍要打开”。
 
 ## 系统要求
 
 - macOS 14 Sonoma 或更高版本
 - Apple Silicon Mac
-
-## 名字
-
-“拾”是从历史中拾回内容，“笺”是随手记下的短笺与片段。拾笺希望做的事情也只有一件：让刚刚经过手边的内容，不会轻易丢失。
 
 ## 许可
 
