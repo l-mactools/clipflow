@@ -2,15 +2,16 @@
 import PackageDescription
 
 let package = Package(
-    name: "ClipFlow",
+    name: "Jian",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "ClipFlow", targets: ["ClipFlow"])
+        .executable(name: "Jian", targets: ["ClipFlow"])
     ],
     targets: [
         .executableTarget(
             name: "ClipFlow",
-            path: "Sources/ClipFlow"
+            path: "Sources/ClipFlow",
+            resources: [.process("Resources")]
         ),
         .testTarget(
             name: "ClipFlowTests",

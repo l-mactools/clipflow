@@ -1,55 +1,38 @@
-import AppKit
 import Carbon
 import Foundation
 
 @MainActor
 final class ShortcutController: ObservableObject {
     @Published private(set) var openShortcut: HotKey
-    @Published private(set) var quickCopyShortcuts: [HotKey]
     @Published private(set) var registrationError: String?
 
-    private let store: ClipboardStore
     private let defaults: UserDefaults
-    private var hotKeyReferences: [EventHotKeyRef] = []
+    private var hotKeyReference: EventHotKeyRef?
     private var eventHandler: EventHandlerRef?
-    private var openWindowAction: (() -> Void)?
+    private var openAction: (() -> Void)?
 
-    init(store: ClipboardStore, defaults: UserDefaults = .standard) {
-        self.store = store
+    init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        self.openShortcut = Self.loadHotKey(key: "openShortcut", defaults: defaults) ?? .openPanel
-        self.quickCopyShortcuts = Self.loadHotKeys(key: "quickCopyShortcuts", defaults: defaults) ?? HotKey.quickCopyDefaults
+        self.openShortcut = Self.loadHotKey(defaults: defaults) ?? .openPanel
         installEventHandler()
-        registerAll()
+        registerShortcut()
     }
 
     deinit {
-        hotKeyReferences.forEach { _ = UnregisterEventHotKey($0) }
+        if let hotKeyReference { UnregisterEventHotKey(hotKeyReference) }
         if let eventHandler { RemoveEventHandler(eventHandler) }
     }
 
+    func setOpenAction(_ action: @escaping () -> Void) {
+        openAction = action
+    }
+
     func updateOpenShortcut(_ shortcut: HotKey) {
-        guard !quickCopyShortcuts.contains(shortcut) else {
-            registrationError = "该快捷键已用于快速复制"
-            return
-        }
         openShortcut = shortcut
-        saveAndRegister()
-    }
-
-    func setOpenWindowAction(_ action: @escaping () -> Void) {
-        openWindowAction = action
-    }
-
-    func updateQuickCopyShortcut(at index: Int, to shortcut: HotKey) {
-        guard quickCopyShortcuts.indices.contains(index) else { return }
-        guard shortcut != openShortcut,
-              !quickCopyShortcuts.enumerated().contains(where: { $0.offset != index && $0.element == shortcut }) else {
-            registrationError = "该快捷键已被其他操作使用"
-            return
+        if let data = try? JSONEncoder().encode(shortcut) {
+            defaults.set(data, forKey: "openShortcut")
         }
-        quickCopyShortcuts[index] = shortcut
-        saveAndRegister()
+        registerShortcut()
     }
 
     private func installEventHandler() {
@@ -68,9 +51,8 @@ final class ShortcutController: ObservableObject {
                     nil,
                     &hotKeyID
                 )
-                guard status == noErr else { return status }
-                let controller = Unmanaged<ShortcutController>.fromOpaque(userData).takeUnretainedValue()
-                controller.handle(id: hotKeyID.id)
+                guard status == noErr, hotKeyID.id == 1 else { return status }
+                Unmanaged<ShortcutController>.fromOpaque(userData).takeUnretainedValue().openAction?()
                 return noErr
             },
             1,
@@ -80,81 +62,32 @@ final class ShortcutController: ObservableObject {
         )
     }
 
-    private func registerAll() {
-        hotKeyReferences.forEach { _ = UnregisterEventHotKey($0) }
-        hotKeyReferences.removeAll()
-        registrationError = nil
-
-        register(openShortcut, id: 1)
-        for (index, shortcut) in quickCopyShortcuts.enumerated() {
-            register(shortcut, id: UInt32(100 + index))
+    private func registerShortcut() {
+        if let hotKeyReference {
+            UnregisterEventHotKey(hotKeyReference)
+            self.hotKeyReference = nil
         }
-    }
-
-    private func register(_ shortcut: HotKey, id: UInt32) {
+        registrationError = nil
         var reference: EventHotKeyRef?
-        let identifier = EventHotKeyID(signature: Self.signature, id: id)
+        let identifier = EventHotKeyID(signature: Self.signature, id: 1)
         let status = RegisterEventHotKey(
-            shortcut.keyCode,
-            shortcut.modifiers,
+            openShortcut.keyCode,
+            openShortcut.modifiers,
             identifier,
             GetApplicationEventTarget(),
             0,
             &reference
         )
-        if status == noErr, let reference {
-            hotKeyReferences.append(reference)
+        if status == noErr {
+            hotKeyReference = reference
         } else {
-            registrationError = "快捷键 \(shortcut.displayName) 已被系统或其他应用占用"
+            registrationError = "快捷键 \(openShortcut.displayName) 已被系统或其他应用占用"
         }
     }
 
-    private func handle(id: UInt32) {
-        if id == 1 {
-            showMainWindow()
-            return
-        }
-        let index = Int(id) - 100
-        let recentItems = store.recentItems
-        guard recentItems.indices.contains(index) else {
-            NSSound.beep()
-            return
-        }
-        store.copy(recentItems[index])
-    }
-
-    private func showMainWindow() {
-        NSApp.setActivationPolicy(.regular)
-        openWindowAction?()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            NSRunningApplication.current.activate(options: [.activateAllWindows])
-            guard let window = NSApp.windows.first(where: { $0.title == "ClipFlow" && $0.canBecomeKey }) else {
-                NSSound.beep()
-                return
-            }
-            window.makeKeyAndOrderFront(nil)
-            window.orderFrontRegardless()
-        }
-    }
-
-    private func saveAndRegister() {
-        if let data = try? JSONEncoder().encode(openShortcut) {
-            defaults.set(data, forKey: "openShortcut")
-        }
-        if let data = try? JSONEncoder().encode(quickCopyShortcuts) {
-            defaults.set(data, forKey: "quickCopyShortcuts")
-        }
-        registerAll()
-    }
-
-    private static func loadHotKey(key: String, defaults: UserDefaults) -> HotKey? {
-        guard let data = defaults.data(forKey: key) else { return nil }
+    private static func loadHotKey(defaults: UserDefaults) -> HotKey? {
+        guard let data = defaults.data(forKey: "openShortcut") else { return nil }
         return try? JSONDecoder().decode(HotKey.self, from: data)
-    }
-
-    private static func loadHotKeys(key: String, defaults: UserDefaults) -> [HotKey]? {
-        guard let data = defaults.data(forKey: key) else { return nil }
-        return try? JSONDecoder().decode([HotKey].self, from: data)
     }
 
     private static let signature: OSType = 0x434C5046 // CLPF

@@ -2,8 +2,6 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var store: ClipboardStore
-    @EnvironmentObject private var shortcuts: ShortcutController
-    @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
     @State private var selectedID: ClipboardItem.ID?
 
@@ -17,23 +15,18 @@ struct ContentView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .toolbarBackground(.hidden, for: .windowToolbar)
-        .onAppear {
-            shortcuts.setOpenWindowAction {
-                openWindow(id: "main")
-            }
-        }
     }
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack(spacing: 10) {
-                Image(systemName: "square.stack.3d.up.fill")
-                    .font(.title2)
-                    .foregroundStyle(.white)
-                    .frame(width: 40, height: 40)
-                    .background(.indigo.gradient, in: RoundedRectangle(cornerRadius: 12))
+                Image(nsImage: Brand.icon)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 48, height: 48)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("ClipFlow").font(.headline)
+                    Text("拾笺").font(.headline)
                     Text("本地剪贴板").font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -95,7 +88,7 @@ struct ContentView: View {
                 ContentUnavailableView(
                     store.searchText.isEmpty ? "复制一些内容试试" : "没有匹配内容",
                     systemImage: "clipboard",
-                    description: Text("ClipFlow 会在本机保存最近的复制记录")
+                    description: Text("拾笺会在本机保存最近的复制记录")
                 )
             } else {
                 List(store.filteredItems, selection: $selectedID) { item in
@@ -115,11 +108,14 @@ struct ContentView: View {
         .toolbar {
             ToolbarItem {
                 Button {
+                    NSApp.setActivationPolicy(.regular)
                     openSettings()
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                         NSRunningApplication.current.activate(options: [.activateAllWindows])
                         let settingsWindow = NSApp.windows.first(where: {
-                            $0.title != "ClipFlow" && $0.canBecomeKey
+                            ($0.title.localizedCaseInsensitiveContains("settings") ||
+                             $0.title.localizedCaseInsensitiveContains("设置")) &&
+                            $0.canBecomeKey
                         })
                         settingsWindow?.makeKeyAndOrderFront(nil)
                         settingsWindow?.orderFrontRegardless()
@@ -148,10 +144,18 @@ struct ContentView: View {
                         .buttonStyle(.borderedProminent)
                 }
                 ScrollView {
-                    Text(item.text)
-                        .font(.system(.body, design: item.kind == .text ? .monospaced : .default))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if item.kind == .image, let image = store.image(for: item) {
+                        Image(nsImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity, maxHeight: 520)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    } else {
+                        Text(item.text)
+                            .font(.system(.body, design: item.kind == .text ? .monospaced : .default))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
                 Text(item.createdAt.formatted(date: .abbreviated, time: .standard))
                     .font(.caption).foregroundStyle(.tertiary)

@@ -1,31 +1,47 @@
+import AppKit
 import SwiftUI
 
 @main
 struct ClipFlowApp: App {
     @StateObject private var store: ClipboardStore
     @StateObject private var shortcuts: ShortcutController
+    @StateObject private var quickPanel: QuickPanelController
+    @State private var didHideInitialWindow = false
 
     init() {
+        Brand.applyApplicationIcon()
         let store = ClipboardStore()
+        let quickPanel = QuickPanelController(store: store)
+        let shortcuts = ShortcutController()
+        shortcuts.setOpenAction { [weak quickPanel] in
+            quickPanel?.toggle()
+        }
         _store = StateObject(wrappedValue: store)
-        _shortcuts = StateObject(wrappedValue: ShortcutController(store: store))
+        _shortcuts = StateObject(wrappedValue: shortcuts)
+        _quickPanel = StateObject(wrappedValue: quickPanel)
     }
 
     var body: some Scene {
-        WindowGroup("ClipFlow", id: "main") {
+        WindowGroup("拾笺", id: "main") {
             ContentView()
                 .environmentObject(store)
-                .environmentObject(shortcuts)
                 .frame(minWidth: 820, minHeight: 560)
                 .background(.ultraThinMaterial)
+                .onAppear {
+                    Brand.applyApplicationIcon()
+                    guard !didHideInitialWindow else { return }
+                    didHideInitialWindow = true
+                    DispatchQueue.main.async {
+                        NSApp.windows.first(where: { $0.title == "拾笺" })?.orderOut(nil)
+                    }
+                }
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 980, height: 680)
 
-        MenuBarExtra("ClipFlow", systemImage: "clipboard") {
+        MenuBarExtra("拾笺", systemImage: "clipboard") {
             MenuBarContent()
                 .environmentObject(store)
-                .environmentObject(shortcuts)
         }
 
         Settings {
@@ -41,13 +57,13 @@ private struct MenuBarContent: View {
     @EnvironmentObject private var store: ClipboardStore
 
     var body: some View {
-        Button("打开 ClipFlow") {
+        Button("打开拾笺") {
             NSApp.setActivationPolicy(.regular)
             openWindow(id: "main")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 NSRunningApplication.current.activate(options: [.activateAllWindows])
                 guard let window = NSApp.windows.first(where: {
-                    $0.title == "ClipFlow" && $0.canBecomeKey
+                    $0.title == "拾笺" && $0.canBecomeKey
                 }) else { return }
                 window.makeKeyAndOrderFront(nil)
                 window.orderFrontRegardless()
@@ -69,10 +85,13 @@ private struct MenuBarContent: View {
     }
 
     private func bringSettingsToFront() {
+        NSApp.setActivationPolicy(.regular)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             NSRunningApplication.current.activate(options: [.activateAllWindows])
             let settingsWindow = NSApp.windows.first(where: {
-                $0.title != "ClipFlow" && $0.canBecomeKey
+                ($0.title.localizedCaseInsensitiveContains("settings") ||
+                 $0.title.localizedCaseInsensitiveContains("设置")) &&
+                $0.canBecomeKey
             })
             settingsWindow?.makeKeyAndOrderFront(nil)
             settingsWindow?.orderFrontRegardless()

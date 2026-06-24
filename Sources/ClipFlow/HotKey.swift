@@ -20,6 +20,7 @@ struct HotKey: Codable, Equatable, Hashable {
         if flags.contains(.option) { carbonFlags |= UInt32(optionKey) }
         if flags.contains(.control) { carbonFlags |= UInt32(controlKey) }
         if flags.contains(.shift) { carbonFlags |= UInt32(shiftKey) }
+        if flags.contains(.function) { carbonFlags |= UInt32(kEventKeyModifierFnMask) }
         guard carbonFlags != 0,
               let characters = event.charactersIgnoringModifiers,
               !characters.isEmpty else { return nil }
@@ -32,6 +33,7 @@ struct HotKey: Codable, Equatable, Hashable {
 
     var displayName: String {
         var value = ""
+        if modifiers & UInt32(kEventKeyModifierFnMask) != 0 { value += "fn" }
         if modifiers & UInt32(controlKey) != 0 { value += "⌃" }
         if modifiers & UInt32(optionKey) != 0 { value += "⌥" }
         if modifiers & UInt32(shiftKey) != 0 { value += "⇧" }
@@ -41,11 +43,4 @@ struct HotKey: Codable, Equatable, Hashable {
 
     static let openPanel = HotKey(keyCode: 9, modifiers: UInt32(cmdKey | shiftKey), keyLabel: "V")
 
-    static let quickCopyDefaults: [HotKey] = [
-        HotKey(keyCode: 18, modifiers: UInt32(cmdKey | optionKey), keyLabel: "1"),
-        HotKey(keyCode: 19, modifiers: UInt32(cmdKey | optionKey), keyLabel: "2"),
-        HotKey(keyCode: 20, modifiers: UInt32(cmdKey | optionKey), keyLabel: "3"),
-        HotKey(keyCode: 21, modifiers: UInt32(cmdKey | optionKey), keyLabel: "4"),
-        HotKey(keyCode: 23, modifiers: UInt32(cmdKey | optionKey), keyLabel: "5")
-    ]
 }

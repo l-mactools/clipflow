@@ -12,19 +12,9 @@ struct ShortcutSettingsView: View {
                         shortcuts.updateOpenShortcut($0)
                     }
                 }
-            }
-
-            Section("直接复制最近记录") {
-                Text("无需打开面板，按下快捷键后，对应记录会直接进入系统剪贴板。")
+                Text("按下快捷键打开历史面板，使用 ↑↓ 选择，按回车确认。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                ForEach(shortcuts.quickCopyShortcuts.indices, id: \.self) { index in
-                    LabeledContent("第 \(index + 1) 条记录") {
-                        ShortcutRecorder(shortcut: shortcuts.quickCopyShortcuts[index]) {
-                            shortcuts.updateQuickCopyShortcut(at: index, to: $0)
-                        }
-                    }
-                }
             }
 
             if let error = shortcuts.registrationError {
@@ -36,7 +26,7 @@ struct ShortcutSettingsView: View {
         }
         .formStyle(.grouped)
         .padding(12)
-        .frame(width: 500, height: 520)
+        .frame(width: 500, height: 260)
     }
 }
 
@@ -77,13 +67,35 @@ private struct ShortcutRecorder: NSViewRepresentable {
     final class RecorderButton: NSButton {
         weak var coordinator: Coordinator?
         var isRecording = false
+        private var keyMonitor: Any?
 
         override var acceptsFirstResponder: Bool { true }
+
+        deinit {
+            if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        }
 
         @objc func beginRecording() {
             isRecording = true
             title = "请按组合键…"
-            window?.makeFirstResponder(self)
+            NSApp.setActivationPolicy(.regular)
+            NSRunningApplication.current.activate(options: [.activateAllWindows])
+            guard let window else {
+                NSSound.beep()
+                return
+            }
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
+            DispatchQueue.main.async { [weak self, weak window] in
+                guard let self, let window else { return }
+                if window.makeFirstResponder(self) {
+                    installKeyMonitor()
+                } else {
+                    isRecording = false
+                    title = coordinator?.shortcut.displayName ?? "设置快捷键"
+                    NSSound.beep()
+                }
+            }
         }
 
         override func keyDown(with event: NSEvent) {
@@ -91,6 +103,19 @@ private struct ShortcutRecorder: NSViewRepresentable {
                 super.keyDown(with: event)
                 return
             }
+            capture(event)
+        }
+
+        private func installKeyMonitor() {
+            removeKeyMonitor()
+            keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self, isRecording else { return event }
+                capture(event)
+                return nil
+            }
+        }
+
+        private func capture(_ event: NSEvent) {
             if event.keyCode == 53 {
                 finishRecording()
                 return
@@ -99,15 +124,23 @@ private struct ShortcutRecorder: NSViewRepresentable {
                 NSSound.beep()
                 return
             }
+            coordinator?.shortcut = shortcut
             coordinator?.onChange(shortcut)
-            title = shortcut.displayName
             finishRecording()
         }
 
         private func finishRecording() {
             isRecording = false
+            removeKeyMonitor()
             if let shortcut = coordinator?.shortcut { title = shortcut.displayName }
             window?.makeFirstResponder(nil)
+        }
+
+        private func removeKeyMonitor() {
+            if let keyMonitor {
+                NSEvent.removeMonitor(keyMonitor)
+                self.keyMonitor = nil
+            }
         }
     }
 }

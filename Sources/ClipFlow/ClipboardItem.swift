@@ -25,13 +25,22 @@ struct ClipboardItem: Identifiable, Codable, Hashable {
     var text: String
     var createdAt: Date
     var isFavorite: Bool
+    var imageFilename: String?
 
-    init(id: UUID = UUID(), kind: ClipKind, text: String, createdAt: Date = .now, isFavorite: Bool = false) {
+    init(
+        id: UUID = UUID(),
+        kind: ClipKind,
+        text: String,
+        createdAt: Date = .now,
+        isFavorite: Bool = false,
+        imageFilename: String? = nil
+    ) {
         self.id = id
         self.kind = kind
         self.text = text
         self.createdAt = createdAt
         self.isFavorite = isFavorite
+        self.imageFilename = imageFilename
     }
 
     var title: String {

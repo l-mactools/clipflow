@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import CryptoKit
 import Foundation
 
 @MainActor
@@ -13,12 +14,16 @@ final class ClipboardStore: ObservableObject {
     private var lastChangeCount: Int
     private var timer: Timer?
     private let storageURL: URL
+    private let imagesDirectory: URL
     private let maximumItems = 500
 
     init(pasteboard: NSPasteboard = .general, storageURL: URL? = nil, startsMonitoring: Bool = true) {
         self.pasteboard = pasteboard
         self.lastChangeCount = pasteboard.changeCount
         self.storageURL = storageURL ?? Self.defaultStorageURL
+        self.imagesDirectory = (storageURL ?? Self.defaultStorageURL)
+            .deletingLastPathComponent()
+            .appendingPathComponent("images", isDirectory: true)
         load()
         if startsMonitoring { startMonitoring() }
     }
@@ -46,21 +51,36 @@ final class ClipboardStore: ObservableObject {
             return
         }
 
+        if let data = pasteboard.data(forType: .tiff), let item = persistImage(data) {
+            insert(item)
+            return
+        }
+
         if let value = pasteboard.string(forType: .string), !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             guard !SensitiveContentDetector.shouldIgnore(value) else { return }
             insert(ClipboardItem(kind: value.detectedClipKind, text: value))
             return
         }
 
-        if pasteboard.data(forType: .tiff) != nil {
-            insert(ClipboardItem(kind: .image, text: "剪贴板图片"))
-        }
     }
 
     func copy(_ item: ClipboardItem) {
         pasteboard.clearContents()
-        pasteboard.setString(item.text, forType: .string)
+        switch item.kind {
+        case .image:
+            guard let image = image(for: item) else { return }
+            pasteboard.writeObjects([image])
+        case .file:
+            pasteboard.writeObjects([URL(fileURLWithPath: item.text) as NSURL])
+        case .text, .link:
+            pasteboard.setString(item.text, forType: .string)
+        }
         lastChangeCount = pasteboard.changeCount
+    }
+
+    func image(for item: ClipboardItem) -> NSImage? {
+        guard let filename = item.imageFilename else { return nil }
+        return NSImage(contentsOf: imagesDirectory.appendingPathComponent(filename))
     }
 
     func toggleFavorite(_ item: ClipboardItem) {
@@ -71,16 +91,23 @@ final class ClipboardStore: ObservableObject {
 
     func delete(_ item: ClipboardItem) {
         items.removeAll { $0.id == item.id }
+        removeImageIfUnused(item.imageFilename)
         save()
     }
 
     func clearUnpinned() {
+        let removedImages = items.filter { !$0.isFavorite }.compactMap(\.imageFilename)
         items.removeAll { !$0.isFavorite }
+        removedImages.forEach(removeImageIfUnused)
         save()
     }
 
     private func insert(_ item: ClipboardItem) {
-        if let duplicate = items.firstIndex(where: { $0.kind == item.kind && $0.text == item.text }) {
+        if let duplicate = items.firstIndex(where: { existing in
+            guard existing.kind == item.kind else { return false }
+            if item.kind == .image { return existing.imageFilename == item.imageFilename }
+            return existing.text == item.text
+        }) {
             var refreshed = items.remove(at: duplicate)
             refreshed.createdAt = .now
             items.insert(refreshed, at: 0)
@@ -88,7 +115,9 @@ final class ClipboardStore: ObservableObject {
             items.insert(item, at: 0)
         }
         if items.count > maximumItems {
+            let removed = items.dropFirst(maximumItems).compactMap(\.imageFilename)
             items = Array(items.prefix(maximumItems))
+            removed.forEach(removeImageIfUnused)
         }
         sortAndSave()
     }
@@ -117,6 +146,36 @@ final class ClipboardStore: ObservableObject {
         guard let data = try? JSONEncoder().encode(items) else { return }
         try? FileManager.default.createDirectory(at: storageURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: storageURL, options: .atomic)
+    }
+
+    private func persistImage(_ sourceData: Data) -> ClipboardItem? {
+        guard let image = NSImage(data: sourceData),
+              let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let png = bitmap.representation(using: .png, properties: [:]) else { return nil }
+        let digest = SHA256.hash(data: png).map { String(format: "%02x", $0) }.joined()
+        let filename = "\(digest).png"
+        let url = imagesDirectory.appendingPathComponent(filename)
+        do {
+            try FileManager.default.createDirectory(at: imagesDirectory, withIntermediateDirectories: true)
+            if !FileManager.default.fileExists(atPath: url.path) {
+                try png.write(to: url, options: .atomic)
+            }
+        } catch {
+            return nil
+        }
+        let width = Int(image.size.width)
+        let height = Int(image.size.height)
+        return ClipboardItem(
+            kind: .image,
+            text: "图片 · \(width) × \(height)",
+            imageFilename: filename
+        )
+    }
+
+    private func removeImageIfUnused(_ filename: String?) {
+        guard let filename, !items.contains(where: { $0.imageFilename == filename }) else { return }
+        try? FileManager.default.removeItem(at: imagesDirectory.appendingPathComponent(filename))
     }
 
     private static var defaultStorageURL: URL {
