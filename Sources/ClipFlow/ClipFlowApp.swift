@@ -51,6 +51,7 @@ struct ClipFlowApp: App {
         Settings {
             ShortcutSettingsView()
                 .environmentObject(shortcuts)
+                .environmentObject(store)
         }
     }
 }

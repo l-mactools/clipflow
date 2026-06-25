@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ShortcutSettingsView: View {
     @EnvironmentObject private var shortcuts: ShortcutController
+    @EnvironmentObject private var store: ClipboardStore
 
     var body: some View {
         Form {
@@ -17,6 +18,26 @@ struct ShortcutSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("历史有效期") {
+                Picker("统一保存时长", selection: unifiedRetentionBinding) {
+                    ForEach(Self.retentionOptions, id: \.hours) { option in
+                        Text(option.title).tag(option.hours)
+                    }
+                }
+
+                Toggle("按内容类型分别设置", isOn: perKindRetentionBinding)
+
+                if !store.retentionPolicy.perKindHours.isEmpty {
+                    ForEach(ClipKind.allCases) { kind in
+                        Picker(kind.rawValue, selection: retentionBinding(for: kind)) {
+                            ForEach(Self.retentionOptions, id: \.hours) { option in
+                                Text(option.title).tag(option.hours)
+                            }
+                        }
+                    }
+                }
+            }
+
             if let error = shortcuts.registrationError {
                 Section {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
@@ -26,8 +47,48 @@ struct ShortcutSettingsView: View {
         }
         .formStyle(.grouped)
         .padding(12)
-        .frame(width: 500, height: 260)
+        .frame(width: 520, height: 500)
     }
+
+    private var unifiedRetentionBinding: Binding<Int> {
+        Binding {
+            store.retentionPolicy.unifiedHours
+        } set: {
+            store.updateUnifiedRetention(hours: $0)
+        }
+    }
+
+    private var perKindRetentionBinding: Binding<Bool> {
+        Binding {
+            !store.retentionPolicy.perKindHours.isEmpty
+        } set: { enabled in
+            if enabled {
+                for kind in ClipKind.allCases where store.retentionPolicy.perKindHours[kind] == nil {
+                    store.updateKindRetention(kind, hours: store.retentionPolicy.unifiedHours)
+                }
+            } else {
+                store.useUnifiedRetentionForAllKinds()
+            }
+        }
+    }
+
+    private func retentionBinding(for kind: ClipKind) -> Binding<Int> {
+        Binding {
+            store.retentionPolicy.perKindHours[kind] ?? store.retentionPolicy.unifiedHours
+        } set: {
+            store.updateKindRetention(kind, hours: $0)
+        }
+    }
+
+    private static let retentionOptions = [
+        (title: "1 小时", hours: 1),
+        (title: "6 小时", hours: 6),
+        (title: "12 小时", hours: 12),
+        (title: "24 小时", hours: 24),
+        (title: "3 天", hours: 72),
+        (title: "7 天", hours: 168),
+        (title: "30 天", hours: 720)
+    ]
 }
 
 private struct ShortcutRecorder: NSViewRepresentable {
@@ -78,7 +139,6 @@ private struct ShortcutRecorder: NSViewRepresentable {
         @objc func beginRecording() {
             isRecording = true
             title = "请按组合键…"
-            NSApp.setActivationPolicy(.regular)
             NSRunningApplication.current.activate(options: [.activateAllWindows])
             guard let window else {
                 NSSound.beep()

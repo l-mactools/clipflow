@@ -45,15 +45,32 @@ struct ClipboardItem: Identifiable, Codable, Hashable {
 
     var title: String {
         let compact = text.replacingOccurrences(of: "\n", with: " ")
+        if kind == .link, let url = URL(string: text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            return url.readableTitle
+        }
         return compact.isEmpty ? kind.rawValue : compact
+    }
+
+    var searchableText: String {
+        "\(title)\n\(text)"
     }
 }
 
 extension String {
     var detectedClipKind: ClipKind {
-        guard let url = URL(string: self), let scheme = url.scheme, ["http", "https"].contains(scheme) else {
+        let value = trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: value), let scheme = url.scheme, ["http", "https"].contains(scheme) else {
             return .text
         }
         return .link
+    }
+}
+
+private extension URL {
+    var readableTitle: String {
+        let host = host?.replacingOccurrences(of: "www.", with: "") ?? absoluteString
+        let path = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !path.isEmpty else { return host }
+        return "\(host) / \(path)"
     }
 }

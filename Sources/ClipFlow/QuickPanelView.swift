@@ -5,7 +5,7 @@ struct QuickPanelView: View {
     @ObservedObject var store: ClipboardStore
 
     private var items: [ClipboardItem] {
-        Array(store.recentItems.prefix(10))
+        controller.visibleItems
     }
 
     var body: some View {
@@ -17,7 +17,7 @@ struct QuickPanelView: View {
                 Text("剪贴板历史")
                     .font(.title3.weight(.semibold))
                 Spacer()
-                Text("↑↓ 选择   ↩ 确认   esc 取消")
+                Text("输入搜索   ⌘1-⌘9 直选   ⌘↩ 粘贴")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -26,19 +26,57 @@ struct QuickPanelView: View {
 
             Divider()
 
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                Text(controller.query.isEmpty ? "输入即可搜索最近记录" : controller.query)
+                    .foregroundStyle(controller.query.isEmpty ? .secondary : .primary)
+                    .lineLimit(1)
+                Spacer()
+                if !controller.query.isEmpty {
+                    Button {
+                        controller.clearSearch()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(.background.opacity(0.55), in: RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+
             ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 6) {
-                        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                            row(item, index: index)
-                                .id(index)
+                Group {
+                    if items.isEmpty {
+                        ContentUnavailableView(
+                            controller.query.isEmpty ? "暂无剪贴板历史" : "没有匹配记录",
+                            systemImage: "clipboard",
+                            description: Text("继续复制内容，拾笺会自动记录可取回的片段")
+                        )
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: 6) {
+                                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                                    row(item, index: index)
+                                        .id(index)
+                                }
+                            }
+                            .padding(10)
                         }
                     }
-                    .padding(10)
                 }
                 .onChange(of: controller.selectedIndex) { _, index in
                     withAnimation(.easeOut(duration: 0.12)) {
                         proxy.scrollTo(index, anchor: .center)
+                    }
+                }
+                .onChange(of: controller.query) { _, _ in
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        proxy.scrollTo(0, anchor: .top)
                     }
                 }
             }

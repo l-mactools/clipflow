@@ -9,21 +9,36 @@ final class ClipboardStore: ObservableObject {
     @Published var isMonitoring = true
     @Published var selectedKind: ClipKind?
     @Published var searchText = ""
+    @Published var retentionPolicy: ClipboardRetentionPolicy {
+        didSet {
+            retentionPolicy.save(to: defaults)
+            enforceRetentionPolicy()
+            sortAndSave()
+        }
+    }
 
     private let pasteboard: NSPasteboard
+    private let defaults: UserDefaults
     private var lastChangeCount: Int
     private var timer: Timer?
     private let storageURL: URL
     private let imagesDirectory: URL
-    private let maximumItems = 500
 
-    init(pasteboard: NSPasteboard = .general, storageURL: URL? = nil, startsMonitoring: Bool = true) {
+    init(
+        pasteboard: NSPasteboard = .general,
+        storageURL: URL? = nil,
+        startsMonitoring: Bool = true,
+        retentionPolicy: ClipboardRetentionPolicy? = nil,
+        defaults: UserDefaults = .standard
+    ) {
         self.pasteboard = pasteboard
+        self.defaults = defaults
         self.lastChangeCount = pasteboard.changeCount
         self.storageURL = storageURL ?? Self.defaultStorageURL
         self.imagesDirectory = (storageURL ?? Self.defaultStorageURL)
             .deletingLastPathComponent()
             .appendingPathComponent("images", isDirectory: true)
+        self.retentionPolicy = retentionPolicy ?? ClipboardRetentionPolicy.load(from: defaults)
         load()
         if startsMonitoring { startMonitoring() }
     }
@@ -33,13 +48,19 @@ final class ClipboardStore: ObservableObject {
     var filteredItems: [ClipboardItem] {
         items.filter { item in
             let matchesKind = selectedKind == nil || item.kind == selectedKind
-            let matchesSearch = searchText.isEmpty || item.text.localizedCaseInsensitiveContains(searchText)
+            let matchesSearch = searchText.isEmpty || item.matches(searchText)
             return matchesKind && matchesSearch
         }
     }
 
     var recentItems: [ClipboardItem] {
         items.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    func recentItems(matching query: String, limit: Int) -> [ClipboardItem] {
+        let value = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidates = value.isEmpty ? recentItems : recentItems.filter { $0.matches(value) }
+        return Array(candidates.prefix(limit))
     }
 
     func captureCurrentClipboard() {
@@ -57,7 +78,6 @@ final class ClipboardStore: ObservableObject {
         }
 
         if let value = pasteboard.string(forType: .string), !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            guard !SensitiveContentDetector.shouldIgnore(value) else { return }
             insert(ClipboardItem(kind: value.detectedClipKind, text: value))
             return
         }
@@ -102,6 +122,24 @@ final class ClipboardStore: ObservableObject {
         save()
     }
 
+    func updateUnifiedRetention(hours: Int) {
+        var policy = retentionPolicy
+        policy.unifiedHours = hours
+        retentionPolicy = policy
+    }
+
+    func updateKindRetention(_ kind: ClipKind, hours: Int?) {
+        var policy = retentionPolicy
+        policy.perKindHours[kind] = hours
+        retentionPolicy = policy
+    }
+
+    func useUnifiedRetentionForAllKinds() {
+        var policy = retentionPolicy
+        policy.perKindHours.removeAll()
+        retentionPolicy = policy
+    }
+
     private func insert(_ item: ClipboardItem) {
         if let duplicate = items.firstIndex(where: { existing in
             guard existing.kind == item.kind else { return false }
@@ -114,11 +152,7 @@ final class ClipboardStore: ObservableObject {
         } else {
             items.insert(item, at: 0)
         }
-        if items.count > maximumItems {
-            let removed = items.dropFirst(maximumItems).compactMap(\.imageFilename)
-            items = Array(items.prefix(maximumItems))
-            removed.forEach(removeImageIfUnused)
-        }
+        enforceRetentionPolicy()
         sortAndSave()
     }
 
@@ -140,6 +174,7 @@ final class ClipboardStore: ObservableObject {
         guard let data = try? Data(contentsOf: storageURL),
               let decoded = try? JSONDecoder().decode([ClipboardItem].self, from: data) else { return }
         items = decoded
+        enforceRetentionPolicy()
     }
 
     private func save() {
@@ -178,6 +213,27 @@ final class ClipboardStore: ObservableObject {
         try? FileManager.default.removeItem(at: imagesDirectory.appendingPathComponent(filename))
     }
 
+    private func enforceRetentionPolicy(now: Date = .now) {
+        let before = items
+        items = items.filter { item in
+            guard !item.isFavorite else { return true }
+            let maxAge = retentionPolicy.maximumAge(for: item.kind)
+            return now.timeIntervalSince(item.createdAt) <= maxAge
+        }
+
+        let favoriteItems = items.filter(\.isFavorite)
+        let regularItems = items
+            .filter { !$0.isFavorite }
+            .sorted { $0.createdAt > $1.createdAt }
+        let regularLimit = max(retentionPolicy.maximumItems - favoriteItems.count, 0)
+        items = favoriteItems + Array(regularItems.prefix(regularLimit))
+
+        let removedImages = before
+            .filter { removed in !items.contains(where: { $0.id == removed.id }) }
+            .compactMap(\.imageFilename)
+        removedImages.forEach(removeImageIfUnused)
+    }
+
     private static var defaultStorageURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("ClipFlow", isDirectory: true)
@@ -185,14 +241,35 @@ final class ClipboardStore: ObservableObject {
     }
 }
 
-enum SensitiveContentDetector {
-    private static let patterns = [
-        #"(?i)bearer\s+[a-z0-9._-]{16,}"#,
-        #"(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*\S+"#,
-        #"-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----"#
-    ]
+struct ClipboardRetentionPolicy: Codable, Equatable {
+    var maximumItems: Int
+    var unifiedHours: Int
+    var perKindHours: [ClipKind: Int]
 
-    static func shouldIgnore(_ value: String) -> Bool {
-        patterns.contains { value.range(of: $0, options: .regularExpression) != nil }
+    func maximumAge(for kind: ClipKind) -> TimeInterval {
+        TimeInterval((perKindHours[kind] ?? unifiedHours) * 60 * 60)
+    }
+
+    func save(to defaults: UserDefaults) {
+        if let data = try? JSONEncoder().encode(self) {
+            defaults.set(data, forKey: Self.defaultsKey)
+        }
+    }
+
+    static func load(from defaults: UserDefaults) -> ClipboardRetentionPolicy {
+        guard let data = defaults.data(forKey: defaultsKey),
+              let policy = try? JSONDecoder().decode(ClipboardRetentionPolicy.self, from: data) else {
+            return .standard
+        }
+        return policy
+    }
+
+    static let standard = ClipboardRetentionPolicy(maximumItems: 500, unifiedHours: 24, perKindHours: [:])
+    private static let defaultsKey = "retentionPolicy"
+}
+
+private extension ClipboardItem {
+    func matches(_ query: String) -> Bool {
+        searchableText.localizedCaseInsensitiveContains(query)
     }
 }
