@@ -92,7 +92,7 @@ swift test
 打包本地 release：
 
 ```bash
-Scripts/package-app.sh 0.2.0
+Scripts/package-app.sh 0.2.1
 ```
 
 ## 贡献

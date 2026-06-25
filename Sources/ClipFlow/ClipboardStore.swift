@@ -57,9 +57,10 @@ final class ClipboardStore: ObservableObject {
         items.sorted { $0.createdAt > $1.createdAt }
     }
 
-    func recentItems(matching query: String, limit: Int) -> [ClipboardItem] {
+    func recentItems(matching query: String, limit: Int? = nil) -> [ClipboardItem] {
         let value = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let candidates = value.isEmpty ? recentItems : recentItems.filter { $0.matches(value) }
+        guard let limit else { return candidates }
         return Array(candidates.prefix(limit))
     }
 
@@ -67,21 +68,26 @@ final class ClipboardStore: ObservableObject {
         guard isMonitoring, pasteboard.changeCount != lastChangeCount else { return }
         lastChangeCount = pasteboard.changeCount
 
+        // 文件 URL（如 Finder 拷贝图片文件）→ 记录为文件路径，而非图片内容
         if let urls = pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL], let first = urls.first, first.isFileURL {
             insert(ClipboardItem(kind: .file, text: first.path))
             return
         }
 
+        // 真正的图片位图数据 → 图片（截图、从浏览器/预览复制的图片内容等）。
+        // 注意：「复制图片内容」与「复制图片路径」是不同操作——前者剪贴板含 tiff 位图，应存图片；
+        // 后者是纯文本路径（无 tiff），会落到下面的文本分支。某些截图工具复制图片时会附带保存
+        // 路径文本，但只要存在 tiff 就应按图片处理。
         if let data = pasteboard.data(forType: .tiff), let item = persistImage(data) {
             insert(item)
             return
         }
 
+        // 文本（含路径文本、链接）
         if let value = pasteboard.string(forType: .string), !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             insert(ClipboardItem(kind: value.detectedClipKind, text: value))
             return
         }
-
     }
 
     func copy(_ item: ClipboardItem) {

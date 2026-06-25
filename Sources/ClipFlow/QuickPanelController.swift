@@ -4,7 +4,9 @@ import SwiftUI
 @MainActor
 final class QuickPanelController: NSObject, ObservableObject, NSWindowDelegate {
     @Published private(set) var selectedIndex = 0
-    @Published var query = ""
+    @Published var query = "" {
+        didSet { selectedIndex = 0 }
+    }
 
     let store: ClipboardStore
     private var panel: QuickPanel?
@@ -32,6 +34,14 @@ final class QuickPanelController: NSObject, ObservableObject, NSWindowDelegate {
         selectedIndex = 0
         query = ""
         let panel = makePanelIfNeeded()
+        // 每次打开都用最新数据重建内容视图：隐藏期间 NSHostingController 不会响应 store 的
+        // 更新，复用旧视图会显示过期快照（表现为「新复制的内容要重启才出现」）。
+        panel.contentViewController = NSHostingController(
+            rootView: QuickPanelView(controller: self, store: store)
+        )
+        // 重新指定 contentViewController 会让窗口缩到新视图的 fitting size，此刻 SwiftUI 尚未布局，
+        // 宽度会瞬时变小；必须显式恢复尺寸后再定位，否则面板会被推到屏幕右侧外。
+        panel.setContentSize(NSSize(width: 640, height: 460))
         position(panel)
         NSRunningApplication.current.activate(options: [])
         panel.makeKeyAndOrderFront(nil)
@@ -40,7 +50,7 @@ final class QuickPanelController: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     var visibleItems: [ClipboardItem] {
-        store.recentItems(matching: query, limit: 10)
+        store.recentItems(matching: query)
     }
 
     func select(_ index: Int) {
@@ -69,15 +79,8 @@ final class QuickPanelController: NSObject, ObservableObject, NSWindowDelegate {
         previousApplication?.activate(options: [.activateAllWindows])
     }
 
-    func appendSearch(_ value: String) {
-        query += value
-        selectedIndex = 0
-    }
-
-    func deleteBackward() {
-        guard !query.isEmpty else { return }
-        query.removeLast()
-        selectedIndex = 0
+    func moveSelection(by offset: Int) {
+        select(selectedIndex + offset)
     }
 
     func clearSearch() {
@@ -110,9 +113,6 @@ final class QuickPanelController: NSObject, ObservableObject, NSWindowDelegate {
         panel.minSize = NSSize(width: 520, height: 360)
         panel.maxSize = NSSize(width: 720, height: 560)
         panel.delegate = self
-        panel.contentViewController = NSHostingController(
-            rootView: QuickPanelView(controller: self, store: store)
-        )
         panel.setContentSize(NSSize(width: 640, height: 460))
         self.panel = panel
         return panel
@@ -132,44 +132,15 @@ final class QuickPanelController: NSObject, ObservableObject, NSWindowDelegate {
         removeKeyMonitor()
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
-            let usesCommand = event.modifierFlags.contains(.command)
-            switch event.keyCode {
-            case 126:
-                select(selectedIndex - 1)
-                return nil
-            case 125:
-                select(selectedIndex + 1)
-                return nil
-            case 36, 76:
-                confirmSelection(pasteAfterCopy: usesCommand)
-                return nil
-            case 53:
-                dismiss()
-                return nil
-            case 51:
-                deleteBackward()
-                return nil
-            case 18, 19, 20, 21, 23, 22, 26, 28, 25:
-                if usesCommand, let index = Self.numberIndex(for: event.keyCode) {
-                    selectedIndex = index
-                    confirmSelection()
-                    return nil
-                }
-                if let characters = event.charactersIgnoringModifiers, !characters.isEmpty {
-                    appendSearch(characters)
-                    return nil
-                }
-                return event
-            default:
-                if !usesCommand,
-                   event.modifierFlags.intersection([.option, .control]).isEmpty,
-                   let characters = event.charactersIgnoringModifiers,
-                   !characters.isEmpty {
-                    appendSearch(characters)
-                    return nil
-                }
+            // 仅拦截 ⌘1-⌘9 直选粘贴。文本输入（含中文输入法）、方向键、回车、Esc 全部交给
+            // 搜索框 NSTextField 及其 delegate 处理，确保输入法组合与候选词确认正常工作。
+            guard event.modifierFlags.contains(.command),
+                  let index = Self.numberIndex(for: event.keyCode) else {
                 return event
             }
+            selectedIndex = index
+            confirmSelection()
+            return nil
         }
     }
 

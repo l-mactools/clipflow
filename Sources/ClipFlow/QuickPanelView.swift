@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct QuickPanelView: View {
@@ -29,10 +30,17 @@ struct QuickPanelView: View {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
-                Text(controller.query.isEmpty ? "输入即可搜索最近记录" : controller.query)
-                    .foregroundStyle(controller.query.isEmpty ? .secondary : .primary)
-                    .lineLimit(1)
-                Spacer()
+                QuickSearchField(
+                    text: $controller.query,
+                    placeholder: "输入即可搜索最近记录",
+                    onMoveUp: { controller.moveSelection(by: -1) },
+                    onMoveDown: { controller.moveSelection(by: 1) },
+                    onSubmit: { commandPressed in
+                        controller.confirmSelection(pasteAfterCopy: commandPressed)
+                    },
+                    onCancel: { controller.dismiss() }
+                )
+                .frame(height: 22)
                 if !controller.query.isEmpty {
                     Button {
                         controller.clearSearch()
@@ -134,6 +142,81 @@ struct QuickPanelView: View {
                     selected ? Color.white.opacity(0.18) : Color.indigo.opacity(0.1),
                     in: RoundedRectangle(cornerRadius: 8)
                 )
+        }
+    }
+}
+
+/// 原生 NSTextField 封装：使用系统文本输入路径，因而完整支持中文/日文等输入法（IME）。
+/// 方向键、回车、Esc 由 delegate 的 doCommandBySelector 处理——输入法组合（marked text）
+/// 进行时这些按键会先交给输入法，不会触发导航，从而保证候选词的选择与确认正常。
+struct QuickSearchField: NSViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    var onMoveUp: () -> Void
+    var onMoveDown: () -> Void
+    var onSubmit: (Bool) -> Void
+    var onCancel: () -> Void
+
+    func makeNSView(context: Context) -> NSTextField {
+        let field = NSTextField()
+        field.delegate = context.coordinator
+        field.isBezeled = false
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.font = .systemFont(ofSize: 15)
+        field.placeholderString = placeholder
+        field.lineBreakMode = .byTruncatingTail
+        field.cell?.usesSingleLineMode = true
+        field.cell?.isScrollable = true
+        field.stringValue = text
+        return field
+    }
+
+    func updateNSView(_ nsView: NSTextField, context: Context) {
+        context.coordinator.parent = self
+        if nsView.stringValue != text {
+            nsView.stringValue = text
+        }
+        if !context.coordinator.didInitialFocus {
+            context.coordinator.didInitialFocus = true
+            DispatchQueue.main.async {
+                nsView.window?.makeFirstResponder(nsView)
+            }
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var parent: QuickSearchField
+        var didInitialFocus = false
+
+        init(_ parent: QuickSearchField) { self.parent = parent }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSTextField else { return }
+            parent.text = field.stringValue
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            switch selector {
+            case #selector(NSResponder.moveUp(_:)):
+                parent.onMoveUp()
+                return true
+            case #selector(NSResponder.moveDown(_:)):
+                parent.onMoveDown()
+                return true
+            case #selector(NSResponder.insertNewline(_:)):
+                let commandPressed = NSApp.currentEvent?.modifierFlags.contains(.command) ?? false
+                parent.onSubmit(commandPressed)
+                return true
+            case #selector(NSResponder.cancelOperation(_:)):
+                parent.onCancel()
+                return true
+            default:
+                return false
+            }
         }
     }
 }
