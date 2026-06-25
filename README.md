@@ -8,7 +8,21 @@
 
 拾笺是一款为键盘工作流设计的 macOS 剪贴板历史工具。复制过的文字、链接、文件和图片都会安静地留在本机；需要时按下快捷键呼出历史，用方向键选择，回车取回。
 
+Jian is a local-first macOS clipboard history app built with SwiftUI. It helps you search, preview, and restore copied text, links, files, and images with a keyboard-first workflow.
+
 它不是一个需要花时间整理的资料库，而是系统剪贴板缺失的“后退键”。
+
+## 功能亮点
+
+- macOS 原生菜单栏应用
+- 本地优先，无账号、无云同步
+- 快捷键呼出历史面板
+- 输入即可搜索剪贴板历史
+- `⌘1` 到 `⌘9` 快速取回最近记录
+- `⌘Enter` 复制并粘贴回当前应用
+- 支持文本、链接、文件、图片和截图
+- 图片缩略图与完整窗口预览
+- 历史默认保存 24 小时，可统一或按类型设置有效期
 
 ## 不打断正在做的事
 
@@ -54,11 +68,47 @@
 
 前往 [Releases](https://github.com/l-mactools/clipflow/releases) 下载最新的 `Jian-*-macos-arm64.dmg`。打开后将 `Jian.app` 拖入“应用程序”目录即可。
 
+如果 macOS 提示来自未识别开发者，可以在“系统设置 → 隐私与安全性”中选择“仍要打开”。当前发布包为本地签名版本，尚未进行 Apple 公证。
+
 ## 系统要求
 
 - macOS 14 Sonoma 或更高版本
 - Apple Silicon Mac
 
+## 开发
+
+要求 Xcode 15 或更高版本。
+
+```bash
+swift run
+```
+
+运行测试：
+
+```bash
+swift test
+```
+
+打包本地 release：
+
+```bash
+Scripts/package-app.sh 0.2.0
+```
+
+## 贡献
+
+欢迎提交 issue 和 pull request。建议先在 issue 中说明场景、当前操作路径和期望体验，再提交实现。
+
+适合优先贡献的方向：
+
+- 快捷面板交互优化
+- 剪贴板内容识别
+- 历史保留策略
+- 图片预览体验
+- Homebrew Cask 分发
+
+版本规划见 [docs/roadmap.md](docs/roadmap.md)。
+
 ## 许可
 
-当前仓库未附加开源许可证。除非另有书面许可，代码版权归项目所有者保留。
+拾笺使用 [MIT License](LICENSE) 开源。
