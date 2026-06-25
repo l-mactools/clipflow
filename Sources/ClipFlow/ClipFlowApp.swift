@@ -10,6 +10,7 @@ struct ClipFlowApp: App {
 
     init() {
         Brand.applyApplicationIcon()
+        NSApp.setActivationPolicy(.accessory)
         let store = ClipboardStore()
         let quickPanel = QuickPanelController(store: store)
         let shortcuts = ShortcutController()
@@ -39,9 +40,12 @@ struct ClipFlowApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 980, height: 680)
 
-        MenuBarExtra("拾笺", systemImage: "clipboard") {
+        MenuBarExtra {
             MenuBarContent()
                 .environmentObject(store)
+        } label: {
+            Image(systemName: "clipboard")
+                .symbolRenderingMode(.monochrome)
         }
 
         Settings {
@@ -58,7 +62,6 @@ private struct MenuBarContent: View {
 
     var body: some View {
         Button("打开拾笺") {
-            NSApp.setActivationPolicy(.regular)
             openWindow(id: "main")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 NSRunningApplication.current.activate(options: [.activateAllWindows])
@@ -85,7 +88,6 @@ private struct MenuBarContent: View {
     }
 
     private func bringSettingsToFront() {
-        NSApp.setActivationPolicy(.regular)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             NSRunningApplication.current.activate(options: [.activateAllWindows])
             let settingsWindow = NSApp.windows.first(where: {

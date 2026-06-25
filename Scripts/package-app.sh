@@ -8,15 +8,17 @@ ARCH="arm64"
 APP_NAME="Jian"
 APP="$ROOT/dist/$APP_NAME.app"
 ZIP="$ROOT/dist/$APP_NAME-$VERSION-macos-$ARCH.zip"
+DMG="$ROOT/dist/$APP_NAME-$VERSION-macos-$ARCH.dmg"
 ICON_SOURCE="$ROOT/Sources/ClipFlow/Resources/JianAppIcon.png"
 ICON_PNG="$ROOT/.build/JianAppIcon-normalized.png"
 ICONSET="$ROOT/.build/Jian.iconset"
+DMG_STAGE="$ROOT/.build/dmg-stage"
 
 cd "$ROOT"
 swift build -c release --arch "$ARCH"
 BIN_DIR="$(swift build -c release --arch "$ARCH" --show-bin-path)"
 
-rm -rf "$APP" "$ICONSET" "$ZIP" "$ZIP.sha256"
+rm -rf "$APP" "$ICONSET" "$ZIP" "$ZIP.sha256" "$DMG" "$DMG.sha256" "$DMG_STAGE"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$ICONSET" "$ROOT/dist"
 
 cp "$BIN_DIR/Jian" "$APP/Contents/MacOS/Jian"
@@ -41,7 +43,20 @@ codesign --force --deep --sign - "$APP"
 (cd "$ROOT/dist" && /usr/bin/zip -qry "${ZIP:t}" "$APP_NAME.app" -x "*/._*" "__MACOSX/*")
 (cd "$ROOT/dist" && shasum -a 256 "${ZIP:t}" > "${ZIP:t}.sha256")
 
+mkdir -p "$DMG_STAGE"
+cp -R "$APP" "$DMG_STAGE/"
+ln -s /Applications "$DMG_STAGE/Applications"
+hdiutil create \
+  -volname "$APP_NAME" \
+  -srcfolder "$DMG_STAGE" \
+  -ov \
+  -format UDZO \
+  "$DMG"
+shasum -a 256 "$DMG" > "$DMG.sha256"
+
 echo "已生成："
 echo "  $APP"
 echo "  $ZIP"
 echo "  $ZIP.sha256"
+echo "  $DMG"
+echo "  $DMG.sha256"
