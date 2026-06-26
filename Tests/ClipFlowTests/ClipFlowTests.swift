@@ -278,4 +278,131 @@ final class ClipFlowTests: XCTestCase {
     func testBasketMergeFormatAllCasesCount() {
         XCTAssertEqual(BasketMergeFormat.allCases.count, 4)
     }
+
+    @MainActor
+    func testAddToBasketAddsEntry() throws {
+        let store = try makeEmptyStore(pasteboard: .withUniqueName())
+        let item = ClipboardItem(kind: .text, text: "hello")
+        store.addToBasket(item)
+        XCTAssertEqual(store.basket.count, 1)
+        XCTAssertEqual(store.basket[0].snapshot.text, "hello")
+    }
+
+    @MainActor
+    func testAddToBasketDeduplicates() throws {
+        let store = try makeEmptyStore(pasteboard: .withUniqueName())
+        let item = ClipboardItem(kind: .text, text: "dup")
+        store.addToBasket(item)
+        store.addToBasket(item)
+        XCTAssertEqual(store.basket.count, 1)
+    }
+
+    @MainActor
+    func testRemoveFromBasket() throws {
+        let store = try makeEmptyStore(pasteboard: .withUniqueName())
+        let item = ClipboardItem(kind: .text, text: "bye")
+        store.addToBasket(item)
+        let entry = try XCTUnwrap(store.basket.first)
+        store.removeFromBasket(entry)
+        XCTAssertTrue(store.basket.isEmpty)
+    }
+
+    @MainActor
+    func testToggleBasketPin() throws {
+        let store = try makeEmptyStore(pasteboard: .withUniqueName())
+        store.addToBasket(ClipboardItem(kind: .text, text: "pin me"))
+        let entry = try XCTUnwrap(store.basket.first)
+        XCTAssertFalse(entry.isPinned)
+        store.toggleBasketPin(entry)
+        XCTAssertTrue(store.basket[0].isPinned)
+        store.toggleBasketPin(store.basket[0])
+        XCTAssertFalse(store.basket[0].isPinned)
+    }
+
+    @MainActor
+    func testClearBasketKeepsPinned() throws {
+        let store = try makeEmptyStore(pasteboard: .withUniqueName())
+        store.addToBasket(ClipboardItem(kind: .text, text: "a"))
+        store.addToBasket(ClipboardItem(kind: .text, text: "b"))
+        store.toggleBasketPin(store.basket[0])   // pin "a" (index 0 = first added)
+        store.clearBasket()
+        XCTAssertEqual(store.basket.count, 1)
+        XCTAssertTrue(store.basket[0].isPinned)
+        XCTAssertEqual(store.basket[0].snapshot.text, "a")
+    }
+
+    @MainActor
+    func testPopNextFromBasketReturnsFIFO() throws {
+        let store = try makeEmptyStore(pasteboard: .withUniqueName())
+        store.addToBasket(ClipboardItem(kind: .text, text: "first"))
+        store.addToBasket(ClipboardItem(kind: .text, text: "second"))
+        let popped = store.popNextFromBasket()
+        XCTAssertEqual(popped?.text, "first")
+        XCTAssertEqual(store.basket.count, 1)
+        XCTAssertEqual(store.basket[0].snapshot.text, "second")
+    }
+
+    @MainActor
+    func testPopNextFromBasketSkipsPinned() throws {
+        let store = try makeEmptyStore(pasteboard: .withUniqueName())
+        store.addToBasket(ClipboardItem(kind: .text, text: "pinned"))
+        store.addToBasket(ClipboardItem(kind: .text, text: "free"))
+        store.toggleBasketPin(store.basket[0])   // pin "pinned"
+        let popped = store.popNextFromBasket()
+        XCTAssertEqual(popped?.text, "free")
+        XCTAssertEqual(store.basket.count, 1)
+    }
+
+    @MainActor
+    func testPopNextFromBasketReturnsNilWhenAllPinned() throws {
+        let store = try makeEmptyStore(pasteboard: .withUniqueName())
+        store.addToBasket(ClipboardItem(kind: .text, text: "only"))
+        store.toggleBasketPin(store.basket[0])
+        let popped = store.popNextFromBasket()
+        XCTAssertNil(popped)
+        XCTAssertEqual(store.basket.count, 1)
+    }
+
+    @MainActor
+    func testMergedBasketTextAllFormats() throws {
+        let store = try makeEmptyStore(pasteboard: .withUniqueName())
+        store.addToBasket(ClipboardItem(kind: .text, text: "alpha"))
+        store.addToBasket(ClipboardItem(kind: .text, text: "beta"))
+        // basket: ["alpha", "beta"] (FIFO order)
+        XCTAssertEqual(
+            store.mergedBasketText(format: .plainText),
+            "alpha\n\nbeta"
+        )
+        XCTAssertEqual(
+            store.mergedBasketText(format: .markdownList),
+            "- alpha\n- beta"
+        )
+        XCTAssertEqual(
+            store.mergedBasketText(format: .blockquote),
+            "> alpha\n\n> beta"
+        )
+        XCTAssertEqual(
+            store.mergedBasketText(format: .promptContext),
+            "[1]\nalpha\n\n[2]\nbeta"
+        )
+    }
+
+    @MainActor
+    func testBasketPersistsAcrossInstances() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let storageURL = directory.appendingPathComponent("history.json")
+
+        let store1 = ClipboardStore(
+            pasteboard: .withUniqueName(), storageURL: storageURL, startsMonitoring: false
+        )
+        store1.addToBasket(ClipboardItem(kind: .text, text: "persisted"))
+
+        let store2 = ClipboardStore(
+            pasteboard: .withUniqueName(), storageURL: storageURL, startsMonitoring: false
+        )
+        XCTAssertEqual(store2.basket.count, 1)
+        XCTAssertEqual(store2.basket.first?.snapshot.text, "persisted")
+    }
 }

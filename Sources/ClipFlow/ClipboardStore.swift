@@ -9,6 +9,7 @@ final class ClipboardStore: ObservableObject {
     @Published var isMonitoring = true
     @Published var selectedKind: ClipKind?
     @Published var searchText = ""
+    @Published private(set) var basket: [BasketEntry] = []
     @Published var retentionPolicy: ClipboardRetentionPolicy {
         didSet {
             retentionPolicy.save(to: defaults)
@@ -23,6 +24,7 @@ final class ClipboardStore: ObservableObject {
     private var timer: Timer?
     private let storageURL: URL
     private let imagesDirectory: URL
+    private let basketURL: URL
 
     init(
         pasteboard: NSPasteboard = .general,
@@ -38,8 +40,12 @@ final class ClipboardStore: ObservableObject {
         self.imagesDirectory = (storageURL ?? Self.defaultStorageURL)
             .deletingLastPathComponent()
             .appendingPathComponent("images", isDirectory: true)
+        self.basketURL = (storageURL ?? Self.defaultStorageURL)
+            .deletingLastPathComponent()
+            .appendingPathComponent("basket.json")
         self.retentionPolicy = retentionPolicy ?? ClipboardRetentionPolicy.load(from: defaults)
         load()
+        loadBasket()
         if startsMonitoring { startMonitoring() }
     }
 
@@ -219,6 +225,22 @@ final class ClipboardStore: ObservableObject {
         try? FileManager.default.removeItem(at: imagesDirectory.appendingPathComponent(filename))
     }
 
+    private func loadBasket() {
+        guard let data = try? Data(contentsOf: basketURL),
+              let decoded = try? JSONDecoder().decode([BasketEntry].self, from: data)
+        else { return }
+        basket = decoded
+    }
+
+    private func saveBasket() {
+        guard let data = try? JSONEncoder().encode(basket) else { return }
+        try? FileManager.default.createDirectory(
+            at: basketURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try? data.write(to: basketURL, options: .atomic)
+    }
+
     private func enforceRetentionPolicy(now: Date = .now) {
         let before = items
         items = items.filter { item in
@@ -244,6 +266,66 @@ final class ClipboardStore: ObservableObject {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("ClipFlow", isDirectory: true)
             .appendingPathComponent("history.json")
+    }
+
+    // MARK: - Basket
+
+    func addToBasket(_ item: ClipboardItem) {
+        guard !basket.contains(where: { $0.snapshot.id == item.id }) else { return }
+        basket.append(BasketEntry(snapshot: item))
+        saveBasket()
+    }
+
+    func removeFromBasket(_ entry: BasketEntry) {
+        basket.removeAll { $0.id == entry.id }
+        saveBasket()
+    }
+
+    func moveBasket(from source: IndexSet, to destination: Int) {
+        basket.move(fromOffsets: source, toOffset: destination)
+        saveBasket()
+    }
+
+    func toggleBasketPin(_ entry: BasketEntry) {
+        guard let index = basket.firstIndex(where: { $0.id == entry.id }) else { return }
+        basket[index].isPinned.toggle()
+        saveBasket()
+    }
+
+    func clearBasket() {
+        basket.removeAll { !$0.isPinned }
+        saveBasket()
+    }
+
+    func mergedBasketText(format: BasketMergeFormat) -> String {
+        let texts = basket.map { $0.snapshot.text }
+        switch format {
+        case .plainText:
+            return texts.joined(separator: "\n\n")
+        case .markdownList:
+            return texts.map { "- \($0)" }.joined(separator: "\n")
+        case .blockquote:
+            return texts.map { "> \($0)" }.joined(separator: "\n\n")
+        case .promptContext:
+            return texts.enumerated()
+                .map { "[\($0.offset + 1)]\n\($0.element)" }
+                .joined(separator: "\n\n")
+        }
+    }
+
+    func copyMergedBasket(format: BasketMergeFormat) {
+        let text = mergedBasketText(format: format)
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        lastChangeCount = pasteboard.changeCount
+    }
+
+    @discardableResult
+    func popNextFromBasket() -> ClipboardItem? {
+        guard let index = basket.firstIndex(where: { !$0.isPinned }) else { return nil }
+        let entry = basket.remove(at: index)
+        saveBasket()
+        return entry.snapshot
     }
 }
 
