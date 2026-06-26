@@ -18,7 +18,7 @@ struct QuickPanelView: View {
                 Text("剪贴板历史")
                     .font(.title3.weight(.semibold))
                 Spacer()
-                Text("输入搜索   ⌘1-⌘9 直选   ⌘↩ 粘贴")
+                Text("输入搜索   ⌘1-⌘9 直选   ⌘↩ 粘贴   ⇥ 加入篮子")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -26,6 +26,23 @@ struct QuickPanelView: View {
             .padding(.vertical, 16)
 
             Divider()
+
+            if !store.basket.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "archivebox.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("篮子 · \(store.basket.count) 条")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("⌘⇧↩ 顺序粘贴")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 10)
+            }
 
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
@@ -38,7 +55,8 @@ struct QuickPanelView: View {
                     onSubmit: { commandPressed in
                         controller.confirmSelection(pasteAfterCopy: commandPressed)
                     },
-                    onCancel: { controller.dismiss() }
+                    onCancel: { controller.dismiss() },
+                    onAddToBasket: { controller.addCurrentToBasket() }
                 )
                 .frame(height: 22)
                 if !controller.query.isEmpty {
@@ -110,6 +128,16 @@ struct QuickPanelView: View {
                     .font(.caption.monospacedDigit())
                     .opacity(0.6)
             }
+            let isInBasket = store.basket.contains { $0.snapshot.id == item.id }
+            let justAdded = controller.lastAddedToBasketID == item.id
+            if isInBasket || justAdded {
+                Image(systemName: justAdded ? "archivebox" : "archivebox.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .opacity(justAdded ? 1.0 : 0.6)
+                    .transition(.opacity)
+                    .animation(.easeOut(duration: 0.3), value: justAdded)
+            }
         }
         .foregroundStyle(controller.selectedIndex == index ? Color.white : Color.primary)
         .padding(.horizontal, 12)
@@ -156,6 +184,7 @@ struct QuickSearchField: NSViewRepresentable {
     var onMoveDown: () -> Void
     var onSubmit: (Bool) -> Void
     var onCancel: () -> Void
+    var onAddToBasket: () -> Void = {}
 
     func makeNSView(context: Context) -> NSTextField {
         let field = NSTextField()
@@ -213,6 +242,9 @@ struct QuickSearchField: NSViewRepresentable {
                 return true
             case #selector(NSResponder.cancelOperation(_:)):
                 parent.onCancel()
+                return true
+            case #selector(NSResponder.insertTab(_:)):
+                parent.onAddToBasket()
                 return true
             default:
                 return false

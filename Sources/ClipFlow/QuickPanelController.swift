@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor
 final class QuickPanelController: NSObject, ObservableObject, NSWindowDelegate {
     @Published private(set) var selectedIndex = 0
+    @Published private(set) var lastAddedToBasketID: UUID?
     @Published var query = "" {
         didSet { selectedIndex = 0 }
     }
@@ -88,6 +89,31 @@ final class QuickPanelController: NSObject, ObservableObject, NSWindowDelegate {
         selectedIndex = 0
     }
 
+    func addCurrentToBasket() {
+        let items = visibleItems
+        guard items.indices.contains(selectedIndex) else { return }
+        let item = items[selectedIndex]
+        store.addToBasket(item)
+        lastAddedToBasketID = item.id
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1))
+            if lastAddedToBasketID == item.id { lastAddedToBasketID = nil }
+        }
+    }
+
+    func popAndPasteFromBasket() {
+        guard let item = store.popNextFromBasket() else {
+            NSSound.beep()
+            return
+        }
+        store.copy(item)
+        let application = previousApplication
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            application?.activate(options: [.activateAllWindows])
+            Self.sendPasteCommand()
+        }
+    }
+
     func windowDidResignKey(_ notification: Notification) {
         guard panel?.isVisible == true else { return }
         dismiss()
@@ -132,8 +158,15 @@ final class QuickPanelController: NSObject, ObservableObject, NSWindowDelegate {
         removeKeyMonitor()
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
-            // 仅拦截 ⌘1-⌘9 直选粘贴。文本输入（含中文输入法）、方向键、回车、Esc 全部交给
-            // 搜索框 NSTextField 及其 delegate 处理，确保输入法组合与候选词确认正常工作。
+
+            // ⌘⇧↩：顺序粘贴篮子下一条
+            if event.modifierFlags.intersection([.command, .shift]) == [.command, .shift],
+               event.keyCode == 36 {
+                popAndPasteFromBasket()
+                return nil
+            }
+
+            // ⌘1-⌘9：直选
             guard event.modifierFlags.contains(.command),
                   let index = Self.numberIndex(for: event.keyCode) else {
                 return event
