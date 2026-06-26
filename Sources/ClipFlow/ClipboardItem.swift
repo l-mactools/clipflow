@@ -74,3 +74,26 @@ private extension URL {
         return "\(host) / \(path)"
     }
 }
+
+struct BasketEntry: Identifiable, Codable {
+    let id: UUID
+    let snapshot: ClipboardItem
+    var isPinned: Bool
+    let addedAt: Date
+
+    init(snapshot: ClipboardItem, isPinned: Bool = false) {
+        self.id = UUID()
+        self.snapshot = snapshot
+        self.isPinned = isPinned
+        self.addedAt = .now
+    }
+}
+
+enum BasketMergeFormat: String, CaseIterable, Identifiable {
+    case plainText     = "纯文本"
+    case markdownList  = "Markdown 列表"
+    case blockquote    = "引用块"
+    case promptContext = "Prompt 上下文"
+
+    var id: Self { self }
+}

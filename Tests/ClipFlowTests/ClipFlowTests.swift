@@ -257,4 +257,25 @@ final class ClipFlowTests: XCTestCase {
               let png = bitmap.representation(using: .png, properties: [:]) else { return Data() }
         return png
     }
+
+    func testBasketEntryInitDefaults() {
+        let item = ClipboardItem(kind: .text, text: "hello")
+        let entry = BasketEntry(snapshot: item)
+        XCTAssertFalse(entry.isPinned)
+        XCTAssertEqual(entry.snapshot.text, "hello")
+    }
+
+    func testBasketEntryCodableRoundtrip() throws {
+        let item = ClipboardItem(kind: .link, text: "https://example.com")
+        let entry = BasketEntry(snapshot: item, isPinned: true)
+        let data = try JSONEncoder().encode(entry)
+        let decoded = try JSONDecoder().decode(BasketEntry.self, from: data)
+        XCTAssertEqual(decoded.snapshot.text, "https://example.com")
+        XCTAssertTrue(decoded.isPinned)
+        XCTAssertEqual(decoded.id, entry.id)
+    }
+
+    func testBasketMergeFormatAllCasesCount() {
+        XCTAssertEqual(BasketMergeFormat.allCases.count, 4)
+    }
 }
