@@ -442,4 +442,77 @@ final class ClipFlowTests: XCTestCase {
         let sixDaysAgo = Calendar.current.date(byAdding: .day, value: -6, to: Date.now)!
         XCTAssertTrue(TimeRange.last7Days.range.contains(sixDaysAgo))
     }
+
+    // MARK: - v0.4 ClipboardStore 过滤与来源追踪
+
+    @MainActor
+    func testFilteredItemsBySourceApp() throws {
+        let pb = NSPasteboard.withUniqueName()
+        let store = try makeEmptyStore(pasteboard: pb)
+        let appA = SourceApp(bundleID: "com.a", name: "AppA")
+        let appB = SourceApp(bundleID: "com.b", name: "AppB")
+
+        store.lastActiveApp = appA
+        pb.clearContents(); pb.setString("from A", forType: .string)
+        store.captureCurrentClipboard()
+
+        store.lastActiveApp = appB
+        pb.clearContents(); pb.setString("from B", forType: .string)
+        store.captureCurrentClipboard()
+
+        store.selectedSourceApp = "com.a"
+        XCTAssertEqual(store.filteredItems.count, 1)
+        XCTAssertEqual(store.filteredItems.first?.text, "from A")
+        store.selectedSourceApp = nil
+        XCTAssertEqual(store.filteredItems.count, 2)
+    }
+
+    @MainActor
+    func testFilteredItemsByTimeRangeToday() throws {
+        let pb = NSPasteboard.withUniqueName()
+        let store = try makeEmptyStore(pasteboard: pb)
+        pb.clearContents(); pb.setString("today item", forType: .string)
+        store.captureCurrentClipboard()
+        // item.createdAt = .now，在 .today 范围内，不在 .yesterday 范围内
+        store.selectedTimeRange = .today
+        XCTAssertEqual(store.filteredItems.count, 1)
+        store.selectedTimeRange = .yesterday
+        XCTAssertEqual(store.filteredItems.count, 0)
+    }
+
+    @MainActor
+    func testUniqueSourceAppsSortedByCount() throws {
+        let pb = NSPasteboard.withUniqueName()
+        let store = try makeEmptyStore(pasteboard: pb)
+        let appA = SourceApp(bundleID: "com.a", name: "AppA")
+        let appB = SourceApp(bundleID: "com.b", name: "AppB")
+
+        store.lastActiveApp = appA
+        pb.clearContents(); pb.setString("a1", forType: .string)
+        store.captureCurrentClipboard()
+
+        store.lastActiveApp = appB
+        pb.clearContents(); pb.setString("b1", forType: .string)
+        store.captureCurrentClipboard()
+        pb.clearContents(); pb.setString("b2", forType: .string)
+        store.captureCurrentClipboard()
+
+        let result = store.uniqueSourceApps
+        XCTAssertEqual(result.count, 2)
+        XCTAssertEqual(result[0].app.bundleID, "com.b")  // count=2，排在前
+        XCTAssertEqual(result[0].count, 2)
+        XCTAssertEqual(result[1].app.bundleID, "com.a")
+        XCTAssertEqual(result[1].count, 1)
+    }
+
+    @MainActor
+    func testCaptureRecordsLastActiveApp() throws {
+        let pb = NSPasteboard.withUniqueName()
+        let store = try makeEmptyStore(pasteboard: pb)
+        store.lastActiveApp = SourceApp(bundleID: "com.test.editor", name: "Editor")
+        pb.clearContents(); pb.setString("hello from editor", forType: .string)
+        store.captureCurrentClipboard()
+        XCTAssertEqual(store.items.first?.sourceApp?.bundleID, "com.test.editor")
+        XCTAssertEqual(store.items.first?.sourceApp?.name, "Editor")
+    }
 }

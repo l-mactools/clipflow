@@ -10,6 +10,9 @@ final class ClipboardStore: ObservableObject {
     @Published var selectedKind: ClipKind?
     @Published var searchText = ""
     @Published private(set) var basket: [BasketEntry] = []
+    @Published var selectedSourceApp: String? = nil
+    @Published var selectedTimeRange: TimeRange? = nil
+    var lastActiveApp: SourceApp?
     @Published var retentionPolicy: ClipboardRetentionPolicy {
         didSet {
             retentionPolicy.save(to: defaults)
@@ -46,6 +49,18 @@ final class ClipboardStore: ObservableObject {
         self.retentionPolicy = retentionPolicy ?? ClipboardRetentionPolicy.load(from: defaults)
         load()
         loadBasket()
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
+                                as? NSRunningApplication,
+                  let bundleID = app.bundleIdentifier,
+                  let name = app.localizedName,
+                  bundleID != Bundle.main.bundleIdentifier else { return }
+            self?.lastActiveApp = SourceApp(bundleID: bundleID, name: name)
+        }
         if startsMonitoring { startMonitoring() }
     }
 
@@ -53,10 +68,20 @@ final class ClipboardStore: ObservableObject {
 
     var filteredItems: [ClipboardItem] {
         items.filter { item in
-            let matchesKind = selectedKind == nil || item.kind == selectedKind
-            let matchesSearch = searchText.isEmpty || item.matches(searchText)
-            return matchesKind && matchesSearch
+            let matchesKind      = selectedKind == nil || item.kind == selectedKind
+            let matchesSearch    = searchText.isEmpty || item.matches(searchText)
+            let matchesSourceApp = selectedSourceApp == nil || item.sourceApp?.bundleID == selectedSourceApp
+            let matchesTimeRange = selectedTimeRange == nil || selectedTimeRange!.range.contains(item.createdAt)
+            return matchesKind && matchesSearch && matchesSourceApp && matchesTimeRange
         }
+    }
+
+    var uniqueSourceApps: [(app: SourceApp, count: Int)] {
+        var counts: [SourceApp: Int] = [:]
+        for item in items {
+            if let app = item.sourceApp { counts[app, default: 0] += 1 }
+        }
+        return counts.map { ($0.key, $0.value) }.sorted { $0.count > $1.count }
     }
 
     var recentItems: [ClipboardItem] {
@@ -73,25 +98,23 @@ final class ClipboardStore: ObservableObject {
     func captureCurrentClipboard() {
         guard isMonitoring, pasteboard.changeCount != lastChangeCount else { return }
         lastChangeCount = pasteboard.changeCount
+        let capturedApp = lastActiveApp
 
-        // 文件 URL（如 Finder 拷贝图片文件）→ 记录为文件路径，而非图片内容
-        if let urls = pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL], let first = urls.first, first.isFileURL {
-            insert(ClipboardItem(kind: .file, text: first.path))
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL],
+           let first = urls.first, first.isFileURL {
+            insert(ClipboardItem(kind: .file, text: first.path, sourceApp: capturedApp))
             return
         }
 
-        // 真正的图片位图数据 → 图片（截图、从浏览器/预览复制的图片内容等）。
-        // 注意：「复制图片内容」与「复制图片路径」是不同操作——前者剪贴板含 tiff 位图，应存图片；
-        // 后者是纯文本路径（无 tiff），会落到下面的文本分支。某些截图工具复制图片时会附带保存
-        // 路径文本，但只要存在 tiff 就应按图片处理。
-        if let data = pasteboard.data(forType: .tiff), let item = persistImage(data) {
+        if let data = pasteboard.data(forType: .tiff), var item = persistImage(data) {
+            item.sourceApp = capturedApp
             insert(item)
             return
         }
 
-        // 文本（含路径文本、链接）
-        if let value = pasteboard.string(forType: .string), !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            insert(ClipboardItem(kind: value.detectedClipKind, text: value))
+        if let value = pasteboard.string(forType: .string),
+           !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            insert(ClipboardItem(kind: value.detectedClipKind, text: value, sourceApp: capturedApp))
             return
         }
     }
