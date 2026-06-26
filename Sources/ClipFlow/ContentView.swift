@@ -6,6 +6,9 @@ struct ContentView: View {
     @State private var selectedID: ClipboardItem.ID?
     @State private var showingBasket = false
     @State private var basketMergeFormat: BasketMergeFormat = .plainText
+    @State private var appIconCache: [String: NSImage] = [:]
+    @State private var sourceAppsExpanded = true
+    @State private var timeRangeExpanded = true
 
     var body: some View {
         NavigationSplitView {
@@ -46,6 +49,28 @@ struct ContentView: View {
                 ForEach(ClipKind.allCases) { kind in
                     filterButton(title: kind.rawValue, symbol: kind.symbol, kind: kind)
                 }
+
+                if !store.uniqueSourceApps.isEmpty {
+                    Divider().padding(.vertical, 4)
+                    DisclosureGroup("来源应用", isExpanded: $sourceAppsExpanded) {
+                        ForEach(store.uniqueSourceApps, id: \.app) { pair in
+                            sourceAppButton(app: pair.app, count: pair.count)
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10)
+                }
+
+                Divider().padding(.vertical, 4)
+                DisclosureGroup("时间段", isExpanded: $timeRangeExpanded) {
+                    ForEach(TimeRange.allCases) { range in
+                        timeRangeButton(range)
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
 
                 Divider().padding(.vertical, 4)
 
@@ -103,6 +128,66 @@ struct ContentView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .background(!showingBasket && store.selectedKind == kind ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 9))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func sourceAppButton(app: SourceApp, count: Int) -> some View {
+        Button {
+            showingBasket = false
+            store.selectedSourceApp = store.selectedSourceApp == app.bundleID ? nil : app.bundleID
+        } label: {
+            HStack {
+                if let icon = appIconCache[app.bundleID] {
+                    Image(nsImage: icon)
+                        .resizable().scaledToFit()
+                        .frame(width: 16, height: 16)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                } else {
+                    Image(systemName: "app.fill")
+                        .frame(width: 16, height: 16)
+                        .foregroundStyle(.secondary)
+                }
+                Text(app.name).lineLimit(1)
+                Spacer()
+                Text("\(count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                !showingBasket && store.selectedSourceApp == app.bundleID
+                    ? Color.accentColor.opacity(0.15) : .clear,
+                in: RoundedRectangle(cornerRadius: 9)
+            )
+        }
+        .buttonStyle(.plain)
+        .task(id: app.bundleID) {
+            guard appIconCache[app.bundleID] == nil,
+                  let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: app.bundleID)
+            else { return }
+            appIconCache[app.bundleID] = NSWorkspace.shared.icon(forFile: url.path)
+        }
+    }
+
+    private func timeRangeButton(_ range: TimeRange) -> some View {
+        Button {
+            showingBasket = false
+            store.selectedTimeRange = store.selectedTimeRange == range ? nil : range
+        } label: {
+            HStack {
+                Image(systemName: "clock").frame(width: 20)
+                Text(range.rawValue)
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                !showingBasket && store.selectedTimeRange == range
+                    ? Color.accentColor.opacity(0.15) : .clear,
+                in: RoundedRectangle(cornerRadius: 9)
+            )
         }
         .buttonStyle(.plain)
     }
@@ -205,6 +290,12 @@ struct ContentView: View {
                     Button { store.toggleFavorite(item) } label: {
                         Image(systemName: item.isFavorite ? "star.fill" : "star")
                     }
+                    if item.sourceApp != nil {
+                        Button(goToSourceLabel(for: item)) {
+                            goToSource(item)
+                        }
+                        .disabled(!canGoToSource(item))
+                    }
                     Button("复制", systemImage: "doc.on.doc") { store.copy(item) }
                         .buttonStyle(.borderedProminent)
                 }
@@ -228,6 +319,44 @@ struct ContentView: View {
             .padding(24)
         } else {
             ContentUnavailableView("选择一条记录", systemImage: "cursorarrow.click.2")
+        }
+    }
+
+    private func goToSourceLabel(for item: ClipboardItem) -> String {
+        switch item.kind {
+        case .link:  return "在浏览器打开"
+        case .file:  return "在 Finder 中显示"
+        default:     return "回到 \(item.sourceApp?.name ?? "来源")"
+        }
+    }
+
+    private func canGoToSource(_ item: ClipboardItem) -> Bool {
+        switch item.kind {
+        case .link: return URL(string: item.text) != nil
+        case .file: return FileManager.default.fileExists(atPath: item.text)
+        default:    return true
+        }
+    }
+
+    private func goToSource(_ item: ClipboardItem) {
+        guard let sourceApp = item.sourceApp else { return }
+        switch item.kind {
+        case .link:
+            if let url = URL(string: item.text) { NSWorkspace.shared.open(url) }
+        case .file:
+            NSWorkspace.shared.selectFile(item.text, inFileViewerRootedAtPath: "")
+        default:
+            if let app = NSWorkspace.shared.runningApplications
+                   .first(where: { $0.bundleIdentifier == sourceApp.bundleID }) {
+                app.activate(options: [.activateAllWindows])
+            } else if let url = NSWorkspace.shared
+                   .urlForApplication(withBundleIdentifier: sourceApp.bundleID) {
+                NSWorkspace.shared.openApplication(
+                    at: url,
+                    configuration: NSWorkspace.OpenConfiguration(),
+                    completionHandler: nil
+                )
+            }
         }
     }
 }
