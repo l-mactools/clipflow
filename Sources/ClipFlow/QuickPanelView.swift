@@ -113,11 +113,39 @@ struct QuickPanelView: View {
                             description: Text("继续复制内容，拾笺会自动记录可取回的片段")
                         )
                     } else {
+                        let contextBundleID = controller.currentContextBundleID
+                        let useGrouping = controller.query.isEmpty && contextBundleID != nil
+                        let contextItems = useGrouping
+                            ? items.filter { $0.sourceApp?.bundleID == contextBundleID }
+                            : []
+                        let otherItems = useGrouping
+                            ? items.filter { $0.sourceApp?.bundleID != contextBundleID }
+                            : items
+
                         ScrollView {
-                            LazyVStack(spacing: 6) {
-                                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                                    row(item, index: index)
-                                        .id(index)
+                            LazyVStack(alignment: .leading, spacing: 6) {
+                                if useGrouping && !contextItems.isEmpty {
+                                    let contextName = contextItems.first?.sourceApp?.name ?? "当前应用"
+                                    Text("来自 \(contextName)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .padding(.horizontal, 12)
+                                        .padding(.top, 4)
+                                    ForEach(Array(contextItems.enumerated()), id: \.element.id) { _, item in
+                                        let idx = items.firstIndex(where: { $0.id == item.id }) ?? 0
+                                        row(item, index: idx).id(idx)
+                                    }
+                                    if !otherItems.isEmpty {
+                                        Text("其他")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .padding(.horizontal, 12)
+                                            .padding(.top, 6)
+                                    }
+                                }
+                                ForEach(Array(otherItems.enumerated()), id: \.element.id) { _, item in
+                                    let idx = items.firstIndex(where: { $0.id == item.id }) ?? 0
+                                    row(item, index: idx).id(idx)
                                 }
                             }
                             .padding(10)

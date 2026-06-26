@@ -50,6 +50,10 @@ final class QuickPanelController: NSObject, ObservableObject, NSWindowDelegate {
         installKeyMonitor()
     }
 
+    var currentContextBundleID: String? {
+        previousApplication?.bundleIdentifier
+    }
+
     var visibleItems: [ClipboardItem] {
         store.recentItems(matching: query)
     }
