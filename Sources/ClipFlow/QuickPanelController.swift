@@ -58,14 +58,21 @@ final class QuickPanelController: NSObject, ObservableObject, NSWindowDelegate {
         store.recentItems(matching: query)
     }
 
+    var displayedItems: [ClipboardItem] {
+        guard query.isEmpty, let bundleID = currentContextBundleID else { return visibleItems }
+        let ctx   = visibleItems.filter { $0.sourceApp?.bundleID == bundleID }
+        let other = visibleItems.filter { $0.sourceApp?.bundleID != bundleID }
+        return ctx + other
+    }
+
     func select(_ index: Int) {
-        let count = visibleItems.count
+        let count = displayedItems.count
         guard count > 0 else { return }
         selectedIndex = min(max(index, 0), count - 1)
     }
 
     func confirmSelection(pasteAfterCopy: Bool = false) {
-        let items = visibleItems
+        let items = displayedItems
         guard items.indices.contains(selectedIndex) else { return }
         store.copy(items[selectedIndex])
         let application = previousApplication
@@ -94,7 +101,7 @@ final class QuickPanelController: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     func addCurrentToBasket() {
-        let items = visibleItems
+        let items = displayedItems
         guard items.indices.contains(selectedIndex) else { return }
         let item = items[selectedIndex]
         store.addToBasket(item)

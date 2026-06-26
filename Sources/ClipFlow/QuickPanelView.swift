@@ -8,7 +8,7 @@ struct QuickPanelView: View {
     @State private var previewFormat: BasketMergeFormat = .plainText
 
     private var items: [ClipboardItem] {
-        controller.visibleItems
+        controller.displayedItems
     }
 
     var body: some View {
@@ -115,37 +115,37 @@ struct QuickPanelView: View {
                     } else {
                         let contextBundleID = controller.currentContextBundleID
                         let useGrouping = controller.query.isEmpty && contextBundleID != nil
-                        let contextItems = useGrouping
-                            ? items.filter { $0.sourceApp?.bundleID == contextBundleID }
-                            : []
-                        let otherItems = useGrouping
-                            ? items.filter { $0.sourceApp?.bundleID != contextBundleID }
-                            : items
+                        // displayedItems already places context items first; count them by prefix
+                        let contextCount = useGrouping
+                            ? items.prefix(while: { $0.sourceApp?.bundleID == contextBundleID }).count
+                            : 0
 
                         ScrollView {
                             LazyVStack(alignment: .leading, spacing: 6) {
-                                if useGrouping && !contextItems.isEmpty {
-                                    let contextName = contextItems.first?.sourceApp?.name ?? "当前应用"
+                                if useGrouping && contextCount > 0 {
+                                    let contextName = items.first?.sourceApp?.name ?? "当前应用"
                                     Text("来自 \(contextName)")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                         .padding(.horizontal, 12)
                                         .padding(.top, 4)
-                                    ForEach(Array(contextItems.enumerated()), id: \.element.id) { _, item in
-                                        let idx = items.firstIndex(where: { $0.id == item.id }) ?? 0
-                                        row(item, index: idx).id(idx)
+                                    ForEach(0..<contextCount, id: \.self) { idx in
+                                        row(items[idx], index: idx).id(idx)
                                     }
-                                    if !otherItems.isEmpty {
+                                    if contextCount < items.count {
                                         Text("其他")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                             .padding(.horizontal, 12)
                                             .padding(.top, 6)
                                     }
-                                }
-                                ForEach(Array(otherItems.enumerated()), id: \.element.id) { _, item in
-                                    let idx = items.firstIndex(where: { $0.id == item.id }) ?? 0
-                                    row(item, index: idx).id(idx)
+                                    ForEach(contextCount..<items.count, id: \.self) { idx in
+                                        row(items[idx], index: idx).id(idx)
+                                    }
+                                } else {
+                                    ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
+                                        row(item, index: idx).id(idx)
+                                    }
                                 }
                             }
                             .padding(10)

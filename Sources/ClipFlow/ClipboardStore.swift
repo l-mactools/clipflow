@@ -28,6 +28,7 @@ final class ClipboardStore: ObservableObject {
     private let storageURL: URL
     private let imagesDirectory: URL
     private let basketURL: URL
+    private var appActivationObserver: Any?
 
     init(
         pasteboard: NSPasteboard = .general,
@@ -49,7 +50,7 @@ final class ClipboardStore: ObservableObject {
         self.retentionPolicy = retentionPolicy ?? ClipboardRetentionPolicy.load(from: defaults)
         load()
         loadBasket()
-        NSWorkspace.shared.notificationCenter.addObserver(
+        appActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil,
             queue: .main
@@ -64,7 +65,12 @@ final class ClipboardStore: ObservableObject {
         if startsMonitoring { startMonitoring() }
     }
 
-    deinit { timer?.invalidate() }
+    deinit {
+        timer?.invalidate()
+        if let obs = appActivationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(obs)
+        }
+    }
 
     var filteredItems: [ClipboardItem] {
         items.filter { item in
