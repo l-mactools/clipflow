@@ -4,14 +4,24 @@ struct ContentView: View {
     @EnvironmentObject private var store: ClipboardStore
     @Environment(\.openSettings) private var openSettings
     @State private var selectedID: ClipboardItem.ID?
+    @State private var showingBasket = false
 
     var body: some View {
         NavigationSplitView {
             sidebar
         } content: {
-            history
+            if showingBasket {
+                BasketView()
+            } else {
+                history
+            }
         } detail: {
-            detail
+            if showingBasket {
+                ContentUnavailableView("", systemImage: "archivebox")
+                    .opacity(0)
+            } else {
+                detail
+            }
         }
         .navigationSplitViewStyle(.balanced)
         .toolbarBackground(.hidden, for: .windowToolbar)
@@ -36,6 +46,33 @@ struct ContentView: View {
                 ForEach(ClipKind.allCases) { kind in
                     filterButton(title: kind.rawValue, symbol: kind.symbol, kind: kind)
                 }
+
+                Divider().padding(.vertical, 4)
+
+                Button {
+                    showingBasket = true
+                    store.selectedKind = nil
+                } label: {
+                    HStack {
+                        Image(systemName: "archivebox").frame(width: 20)
+                        Text("篮子")
+                        Spacer()
+                        if store.basket.count > 0 {
+                            Text("\(store.basket.count)")
+                                .font(.caption.monospacedDigit())
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.accentColor.opacity(0.15), in: Capsule())
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(
+                        showingBasket ? Color.accentColor.opacity(0.15) : .clear,
+                        in: RoundedRectangle(cornerRadius: 9)
+                    )
+                }
+                .buttonStyle(.plain)
             }
 
             Spacer()
@@ -55,6 +92,7 @@ struct ContentView: View {
 
     private func filterButton(title: String, symbol: String, kind: ClipKind?) -> some View {
         Button {
+            showingBasket = false
             store.selectedKind = kind
         } label: {
             HStack {
@@ -64,7 +102,7 @@ struct ContentView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .background(store.selectedKind == kind ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 9))
+            .background(!showingBasket && store.selectedKind == kind ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 9))
         }
         .buttonStyle(.plain)
     }
@@ -184,6 +222,120 @@ private struct ClipRow: View {
             }
             Spacer()
             if item.isFavorite { Image(systemName: "star.fill").foregroundStyle(.yellow) }
+        }
+        .padding(.vertical, 5)
+    }
+}
+
+private struct BasketView: View {
+    @EnvironmentObject private var store: ClipboardStore
+    @State private var selectedFormat: BasketMergeFormat = .plainText
+    @State private var copyConfirmed = false
+    @State private var showingClearConfirm = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Picker("格式", selection: $selectedFormat) {
+                    ForEach(BasketMergeFormat.allCases) { format in
+                        Text(format.rawValue).tag(format)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(maxWidth: 160)
+
+                Spacer()
+
+                Button {
+                    store.copyMergedBasket(format: selectedFormat)
+                    copyConfirmed = true
+                    Task {
+                        try? await Task.sleep(for: .seconds(1))
+                        copyConfirmed = false
+                    }
+                } label: {
+                    Label(copyConfirmed ? "已复制 ✓" : "合并取用",
+                          systemImage: copyConfirmed ? "checkmark" : "doc.on.doc")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(store.basket.isEmpty)
+
+                Button("清空未固定", systemImage: "trash") {
+                    showingClearConfirm = true
+                }
+                .disabled(store.basket.filter { !$0.isPinned }.isEmpty)
+            }
+            .padding(14)
+
+            Divider()
+
+            if store.basket.isEmpty {
+                ContentUnavailableView(
+                    "篮子是空的",
+                    systemImage: "archivebox",
+                    description: Text("在快捷面板中按 ⇥ 将条目加入篮子")
+                )
+            } else {
+                List {
+                    ForEach(store.basket) { entry in
+                        BasketRow(entry: entry)
+                    }
+                    .onMove { source, destination in
+                        store.moveBasket(from: source, to: destination)
+                    }
+                }
+                .listStyle(.inset)
+
+                Divider()
+                Text("合并取用将内容写入剪贴板，再 ⌘V 粘贴到目标位置")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(10)
+            }
+        }
+        .navigationSplitViewColumnWidth(min: 320, ideal: 480)
+        .alert("清空篮子中未固定的条目？", isPresented: $showingClearConfirm) {
+            Button("清空", role: .destructive) { store.clearBasket() }
+            Button("取消", role: .cancel) {}
+        }
+    }
+}
+
+private struct BasketRow: View {
+    @EnvironmentObject private var store: ClipboardStore
+    let entry: BasketEntry
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: entry.snapshot.kind.symbol)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.indigo)
+                .frame(width: 34, height: 34)
+                .background(.indigo.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(entry.snapshot.title).lineLimit(2)
+                Text(entry.addedAt, style: .relative)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button {
+                store.toggleBasketPin(entry)
+            } label: {
+                Image(systemName: entry.isPinned ? "pin.fill" : "pin")
+                    .foregroundStyle(entry.isPinned ? Color.orange : Color.secondary)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                store.removeFromBasket(entry)
+            } label: {
+                Image(systemName: "xmark")
+                    .foregroundStyle(Color.secondary)
+            }
+            .buttonStyle(.plain)
         }
         .padding(.vertical, 5)
     }
