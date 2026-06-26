@@ -19,6 +19,34 @@ enum ClipKind: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+struct SourceApp: Codable, Hashable {
+    let bundleID: String
+    let name: String
+}
+
+enum TimeRange: String, CaseIterable, Identifiable {
+    case today      = "今天"
+    case yesterday  = "昨天"
+    case last7Days  = "近 7 天"
+
+    var id: Self { self }
+
+    var range: ClosedRange<Date> {
+        let cal = Calendar.current
+        let now = Date.now
+        switch self {
+        case .today:
+            return cal.startOfDay(for: now)...now
+        case .yesterday:
+            let start = cal.startOfDay(for: cal.date(byAdding: .day, value: -1, to: now)!)
+            let end   = cal.startOfDay(for: now)
+            return start...end
+        case .last7Days:
+            return cal.date(byAdding: .day, value: -7, to: now)!...now
+        }
+    }
+}
+
 struct ClipboardItem: Identifiable, Codable, Hashable {
     let id: UUID
     var kind: ClipKind
@@ -26,6 +54,7 @@ struct ClipboardItem: Identifiable, Codable, Hashable {
     var createdAt: Date
     var isFavorite: Bool
     var imageFilename: String?
+    var sourceApp: SourceApp?
 
     init(
         id: UUID = UUID(),
@@ -33,7 +62,8 @@ struct ClipboardItem: Identifiable, Codable, Hashable {
         text: String,
         createdAt: Date = .now,
         isFavorite: Bool = false,
-        imageFilename: String? = nil
+        imageFilename: String? = nil,
+        sourceApp: SourceApp? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -41,6 +71,7 @@ struct ClipboardItem: Identifiable, Codable, Hashable {
         self.createdAt = createdAt
         self.isFavorite = isFavorite
         self.imageFilename = imageFilename
+        self.sourceApp = sourceApp
     }
 
     var title: String {

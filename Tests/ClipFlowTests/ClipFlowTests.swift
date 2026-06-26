@@ -405,4 +405,41 @@ final class ClipFlowTests: XCTestCase {
         XCTAssertEqual(store2.basket.count, 1)
         XCTAssertEqual(store2.basket.first?.snapshot.text, "persisted")
     }
+
+    // MARK: - v0.4 数据类型
+
+    func testSourceAppCodableRoundtrip() throws {
+        let app = SourceApp(bundleID: "com.example.app", name: "Example")
+        let data = try JSONEncoder().encode(app)
+        let decoded = try JSONDecoder().decode(SourceApp.self, from: data)
+        XCTAssertEqual(decoded.bundleID, "com.example.app")
+        XCTAssertEqual(decoded.name, "Example")
+    }
+
+    func testClipboardItemDecodesWithoutSourceApp() throws {
+        // 旧格式 JSON 没有 sourceApp 字段，应解码为 nil，不崩溃
+        let json = """
+        {"id":"00000000-0000-0000-0000-000000000001","kind":"文本","text":"hello",
+         "createdAt":0,"isFavorite":false}
+        """
+        let item = try JSONDecoder().decode(ClipboardItem.self, from: Data(json.utf8))
+        XCTAssertNil(item.sourceApp)
+        XCTAssertEqual(item.text, "hello")
+    }
+
+    func testTimeRangeTodayContainsNow() {
+        let now = Date()          // 先捕获，确保在 range.upperBound 之前
+        XCTAssertTrue(TimeRange.today.range.contains(now))
+    }
+
+    func testTimeRangeYesterdayContainsYesterdayDate() {
+        let yesterday = Calendar.current.date(byAdding: .hour, value: -25, to: Date.now)!
+        XCTAssertTrue(TimeRange.yesterday.range.contains(yesterday))
+        XCTAssertFalse(TimeRange.today.range.contains(yesterday))
+    }
+
+    func testTimeRangeLast7DaysContainsSixDaysAgo() {
+        let sixDaysAgo = Calendar.current.date(byAdding: .day, value: -6, to: Date.now)!
+        XCTAssertTrue(TimeRange.last7Days.range.contains(sixDaysAgo))
+    }
 }
