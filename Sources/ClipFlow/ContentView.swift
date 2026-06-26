@@ -5,20 +5,20 @@ struct ContentView: View {
     @Environment(\.openSettings) private var openSettings
     @State private var selectedID: ClipboardItem.ID?
     @State private var showingBasket = false
+    @State private var basketMergeFormat: BasketMergeFormat = .plainText
 
     var body: some View {
         NavigationSplitView {
             sidebar
         } content: {
             if showingBasket {
-                BasketView()
+                BasketView(selectedFormat: $basketMergeFormat)
             } else {
                 history
             }
         } detail: {
             if showingBasket {
-                ContentUnavailableView("", systemImage: "archivebox")
-                    .opacity(0)
+                basketPreview
             } else {
                 detail
             }
@@ -168,6 +168,33 @@ struct ContentView: View {
         }
     }
 
+    @ViewBuilder private var basketPreview: some View {
+        if store.basket.isEmpty {
+            ContentUnavailableView("篮子是空的", systemImage: "archivebox")
+        } else {
+            let previewText = store.mergedBasketText(format: basketMergeFormat)
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    Label(basketMergeFormat.rawValue, systemImage: "eye")
+                        .foregroundStyle(.secondary)
+                        .font(.subheadline)
+                    Spacer()
+                    Text("\(store.basket.filter { $0.snapshot.kind != .image }.count) 条文本")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                Divider()
+                ScrollView {
+                    Text(previewText)
+                        .font(.system(.body, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(24)
+        }
+    }
+
     @ViewBuilder private var detail: some View {
         if let selectedID, let item = store.items.first(where: { $0.id == selectedID }) {
             VStack(alignment: .leading, spacing: 22) {
@@ -229,7 +256,7 @@ private struct ClipRow: View {
 
 private struct BasketView: View {
     @EnvironmentObject private var store: ClipboardStore
-    @State private var selectedFormat: BasketMergeFormat = .plainText
+    @Binding var selectedFormat: BasketMergeFormat
     @State private var copyConfirmed = false
     @State private var showingClearConfirm = false
 

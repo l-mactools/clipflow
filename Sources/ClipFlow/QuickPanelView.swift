@@ -4,6 +4,8 @@ import SwiftUI
 struct QuickPanelView: View {
     @ObservedObject var controller: QuickPanelController
     @ObservedObject var store: ClipboardStore
+    @State private var showingBasketPreview = false
+    @State private var previewFormat: BasketMergeFormat = .plainText
 
     private var items: [ClipboardItem] {
         controller.visibleItems
@@ -18,9 +20,15 @@ struct QuickPanelView: View {
                 Text("剪贴板历史")
                     .font(.title3.weight(.semibold))
                 Spacer()
-                Text("输入搜索   ⌘1-⌘9 直选   ⌘↩ 粘贴   ⇥ 加入篮子")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if showingBasketPreview {
+                    Text("⌘⇧↩ 顺序粘贴   Esc 关闭")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("输入搜索   ⌘1-⌘9 直选   ⌘↩ 粘贴   ⇥ 加入篮子")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 16)
@@ -28,22 +36,43 @@ struct QuickPanelView: View {
             Divider()
 
             if !store.basket.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "archivebox.fill")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("篮子 · \(store.basket.count) 条")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text("⌘⇧↩ 顺序粘贴")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                Button {
+                    showingBasketPreview.toggle()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: showingBasketPreview ? "chevron.left" : "archivebox.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(showingBasketPreview ? "返回历史列表" : "篮子 · \(store.basket.count) 条")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("⌘⇧↩ 顺序粘贴")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 10)
                 }
-                .padding(.horizontal, 18)
-                .padding(.top, 10)
+                .buttonStyle(.plain)
             }
 
+            if showingBasketPreview {
+                basketPreviewSection
+            } else {
+                historySection
+            }
+        }
+        .frame(width: 640, height: 460)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .onChange(of: store.basket.isEmpty) { _, empty in
+            if empty { showingBasketPreview = false }
+        }
+    }
+
+    private var historySection: some View {
+        Group {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
@@ -107,9 +136,42 @@ struct QuickPanelView: View {
                 }
             }
         }
-        .frame(width: 640, height: 460)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var basketPreviewSection: some View {
+        HStack(spacing: 10) {
+            Picker("格式", selection: $previewFormat) {
+                ForEach(BasketMergeFormat.allCases) { fmt in
+                    Text(fmt.rawValue).tag(fmt)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(maxWidth: 160)
+
+            Spacer()
+
+            Button("合并取用", systemImage: "doc.on.doc") {
+                store.copyMergedBasket(format: previewFormat)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 12)
+        .padding(.bottom, 6)
+
+        ScrollView {
+            Text(store.mergedBasketText(format: previewFormat))
+                .font(.system(.body, design: .monospaced))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+        }
+        .frame(maxHeight: .infinity)
+        .background(.background.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 14)
+        .padding(.bottom, 14)
     }
 
     private func row(_ item: ClipboardItem, index: Int) -> some View {
